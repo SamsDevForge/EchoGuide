@@ -1,12 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AudioGuide } from './audio';
-import type { Observation, Preferences } from './contracts';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AudioGuide } from "./audio";
+import type { Observation, Preferences } from "./contracts";
 
-const prefs: Preferences = { volume: 0.5, announcementIntervalMs: 2000, spatialMode: 'stereo' };
+const prefs: Preferences = {
+  volume: 0.5,
+  announcementIntervalMs: 2000,
+  spatialMode: "stereo",
+};
 const item = (patch: Partial<Observation> = {}): Observation => ({
-  timestamp: performance.now(), trackId: 'chair-1', label: 'chair', score: 0.9,
-  box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 }, direction: 'left',
-  horizontalPosition: 0.25, distanceMetres: null, depthSource: 'none', depthState: 'unavailable', ...patch,
+  timestamp: performance.now(),
+  trackId: "chair-1",
+  label: "chair",
+  score: 0.9,
+  box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+  direction: "left",
+  horizontalPosition: 0.25,
+  distanceMetres: null,
+  depthSource: "none",
+  depthState: "unavailable",
+  ...patch,
 });
 
 class MockNode {
@@ -32,27 +44,54 @@ let cancelSpeech: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.spyOn(performance, 'now').mockImplementation(() => Date.now() - 1_000_000);
+  vi.spyOn(performance, "now").mockImplementation(() => Date.now() - 1_000_000);
   vi.setSystemTime(1_000_000);
   oscillators = [];
   spoken = [];
   cancelSpeech = vi.fn();
-  vi.stubGlobal('window', { speechSynthesis: { speak: vi.fn((utterance: MockUtterance) => spoken.push(utterance)), cancel: cancelSpeech } });
-  vi.stubGlobal('SpeechSynthesisUtterance', MockUtterance);
-  vi.stubGlobal('AudioContext', class {
-    state = 'running';
-    currentTime = 0;
-    destination = new MockNode();
-    resume = vi.fn(async () => undefined);
-    createOscillator() { const osc = new MockOscillator(); oscillators.push(osc); return osc; }
-    createGain() { return Object.assign(new MockNode(), { gain: { setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() } }); }
-    createStereoPanner() { return Object.assign(new MockNode(), { pan: { value: 0 } }); }
+  vi.stubGlobal("window", {
+    speechSynthesis: {
+      speak: vi.fn((utterance: MockUtterance) => spoken.push(utterance)),
+      cancel: cancelSpeech,
+    },
   });
+  vi.stubGlobal("SpeechSynthesisUtterance", MockUtterance);
+  vi.stubGlobal(
+    "AudioContext",
+    class {
+      state = "running";
+      currentTime = 0;
+      destination = new MockNode();
+      resume = vi.fn(async () => undefined);
+      createOscillator() {
+        const osc = new MockOscillator();
+        oscillators.push(osc);
+        return osc;
+      }
+      createGain() {
+        return Object.assign(new MockNode(), {
+          gain: {
+            setValueAtTime: vi.fn(),
+            linearRampToValueAtTime: vi.fn(),
+            exponentialRampToValueAtTime: vi.fn(),
+          },
+        });
+      }
+      createStereoPanner() {
+        return Object.assign(new MockNode(), { pan: { value: 0 } });
+      }
+    },
+  );
 });
-afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
-describe('audio cancellation across scene changes', () => {
-  it('pause stops a pending tone and prevents its delayed spoken label; resume permits the same observation', async () => {
+describe("audio cancellation across scene changes", () => {
+  it("pause stops a pending tone and prevents its delayed spoken label; resume permits the same observation", async () => {
     const guide = new AudioGuide();
     const onText = vi.fn();
     await guide.unlock();
@@ -66,26 +105,28 @@ describe('audio cancellation across scene changes', () => {
     expect(spoken).toHaveLength(0);
     guide.update([item()], prefs, onText);
     vi.advanceTimersByTime(260);
-    expect(spoken.map(utterance => utterance.text)).toEqual(['chair, left.']);
+    expect(spoken.map((utterance) => utterance.text)).toEqual(["chair, left."]);
     expect(onText).toHaveBeenCalledTimes(2);
   });
 
-  it('cancels an outdated pending label when the tracked object changes direction', async () => {
+  it("cancels an outdated pending label when the tracked object changes direction", async () => {
     const guide = new AudioGuide();
     await guide.unlock();
     guide.update([item()], prefs, vi.fn());
     vi.advanceTimersByTime(100);
-    guide.update([item({ direction: 'right' })], prefs, vi.fn());
+    guide.update([item({ direction: "right" })], prefs, vi.fn());
     vi.advanceTimersByTime(300);
     expect(spoken).toHaveLength(0);
     // Scene changes preserve the pace limit; the correct label arrives after it.
     vi.advanceTimersByTime(1600);
-    guide.update([item({ direction: 'right' })], prefs, vi.fn());
+    guide.update([item({ direction: "right" })], prefs, vi.fn());
     vi.advanceTimersByTime(260);
-    expect(spoken.map(utterance => utterance.text)).toEqual(['chair, right.']);
+    expect(spoken.map((utterance) => utterance.text)).toEqual([
+      "chair, right.",
+    ]);
   });
 
-  it('cancels active speech when its object disappears or becomes stale', async () => {
+  it("cancels active speech when its object disappears or becomes stale", async () => {
     const guide = new AudioGuide();
     await guide.unlock();
     guide.update([item()], prefs, vi.fn());
@@ -105,22 +146,22 @@ describe('audio cancellation across scene changes', () => {
     expect(spoken).toHaveLength(2);
   });
 
-  it('still announces the original direction after left-right-left changes cancel its pending label', async () => {
+  it("still announces the original direction after left-right-left changes cancel its pending label", async () => {
     const guide = new AudioGuide();
     await guide.unlock();
     guide.update([item()], prefs, vi.fn());
     vi.advanceTimersByTime(100);
-    guide.update([item({ direction: 'right' })], prefs, vi.fn());
+    guide.update([item({ direction: "right" })], prefs, vi.fn());
     vi.advanceTimersByTime(100);
-    guide.update([item({ direction: 'left' })], prefs, vi.fn());
+    guide.update([item({ direction: "left" })], prefs, vi.fn());
     vi.advanceTimersByTime(1800);
     expect(spoken).toHaveLength(0);
-    guide.update([item({ direction: 'left' })], prefs, vi.fn());
+    guide.update([item({ direction: "left" })], prefs, vi.fn());
     vi.advanceTimersByTime(260);
-    expect(spoken.map(utterance => utterance.text)).toEqual(['chair, left.']);
+    expect(spoken.map((utterance) => utterance.text)).toEqual(["chair, left."]);
   });
 
-  it('ignores completion events from cancelled speech while a new utterance is active', async () => {
+  it("ignores completion events from cancelled speech while a new utterance is active", async () => {
     const guide = new AudioGuide();
     const onText = vi.fn();
     await guide.unlock();
@@ -128,13 +169,27 @@ describe('audio cancellation across scene changes', () => {
     vi.advanceTimersByTime(260);
     const oldEnd = spoken[0].onend!;
     guide.cancel();
-    guide.update([item({ trackId: 'person-2', label: 'person' })], prefs, onText);
+    guide.update(
+      [item({ trackId: "person-2", label: "person" })],
+      prefs,
+      onText,
+    );
     vi.advanceTimersByTime(260);
     oldEnd();
     vi.advanceTimersByTime(2100);
-    guide.update([item({ trackId: 'person-2', label: 'person' }), item({ trackId: 'backpack-3', label: 'backpack' })], prefs, onText);
+    guide.update(
+      [
+        item({ trackId: "person-2", label: "person" }),
+        item({ trackId: "backpack-3", label: "backpack" }),
+      ],
+      prefs,
+      onText,
+    );
     vi.advanceTimersByTime(260);
-    expect(spoken.map(utterance => utterance.text)).toEqual(['chair, left.', 'person, left.']);
+    expect(spoken.map((utterance) => utterance.text)).toEqual([
+      "chair, left.",
+      "person, left.",
+    ]);
     expect(onText).toHaveBeenCalledTimes(2);
   });
 });

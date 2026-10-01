@@ -14,9 +14,11 @@ The server suite validates guest health without credentials, clear missing-integ
 
 Server TypeScript checking, production compilation, and all **9 server API tests** passed on the development computer on 29 September 2026. The password-hashing integration test permits 30 seconds to accommodate slower hosts; the successful run completed the suite in about 7 seconds. Browser and physical device checks are separate from automated checks; record the final root-workspace check output alongside this checklist.
 
-On **1 October 2026**, root type checking and production builds passed, with **14 client tests and 9 server tests passing**. Client coverage includes left/right mapping, rejection of sparse/mixed depth, range conversion, track expiry, duplicate announcement suppression, stale-speech cancellation, late camera-permission cancellation, and left-right-left changes before speech starts. Runtime dependency audit reported zero known vulnerabilities.
+On **1 October 2026**, root type checking and production builds passed, with **15 client tests and 9 server tests passing**. Client coverage includes left/right mapping, rejection of sparse/mixed depth, range conversion, track expiry, duplicate announcement suppression, stale-speech cancellation, late camera-permission cancellation, frozen camera frames, and left-right-left changes before speech starts. Runtime dependency audit reported zero known vulnerabilities.
 
 Desktop browser checks confirmed the labelled audio demo, sample cue updates, Pause clearing objects, stereo calibration controls, Escape dismissal, route navigation, and the explicit unsupported immersive-AR result. These observations establish interface behaviour only; actual earbud audio and target-phone camera/depth performance remain pending.
+
+GitHub Actions also passed fresh dependency installation, model preparation, checks and deployment. The public HTTPS app and its model/WASM assets returned HTTP 200. The mobile layout was inspected at 390 × 844 without horizontal overflow; this is viewport emulation, not phone verification.
 
 ## Physical checklist
 

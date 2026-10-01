@@ -24,7 +24,10 @@ Started: 2026-09-29 11:56 IST. Workspace was empty.
 
 ## Next steps
 - Implemented camera sensing, audio, probe, optional backend and deployment files.
-- Passed root type checking, 23 automated tests, production builds; runtime audit found zero known issues.
+- Passed root type checking, 24 automated tests, production builds; runtime audit found zero known issues.
 - Confirmed model labels in downloaded labels.txt: person, chair, backpack.
 - Browser demo, Pause, calibration, Escape and unsupported XR state checked.
-- Finish HTTPS deployment and public asset smoke tests, record links and physical-test instructions.
+- Published to https://github.com/SamsDevForge/EchoGuide and https://samsdevforge.github.io/EchoGuide/.
+- Fresh GitHub Actions installation, checks and deployment passed. Public app/model/WASM assets returned HTTP 200.
+- Final frame-freshness/rotation fix verified; source formatted for maintenance and reproduction.
+- User has phone test URL/procedure; no physical results reported yet. See docs/COMPLETION.md.
