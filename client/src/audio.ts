@@ -83,14 +83,19 @@ export class AudioGuide {
       if (this.oscillator === osc) this.oscillator = null;
     };
   }
-  say(item: Observation, prefs: Preferences, onText: (text: string) => void) {
+  say(
+    item: Observation,
+    prefs: Preferences,
+    onText: (text: string) => void,
+    spokenText?: string,
+  ) {
     this.cancel(false);
     this.busy = true;
     this.activeTrack = item.trackId;
     this.activeSignature = signature(item);
     const generation = this.generation;
     this.tone(item.direction, prefs);
-    const phrase = phraseFor(item);
+    const phrase = spokenText ?? phraseFor(item);
     onText(phrase);
     this.timer = setTimeout(() => {
       if (generation !== this.generation) return;

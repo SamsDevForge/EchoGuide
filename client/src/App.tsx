@@ -8,7 +8,6 @@ import {
   Camera,
   Check,
   ChevronRight,
-  CircleHelp,
   Copy,
   Ear,
   Eye,
@@ -17,7 +16,6 @@ import {
   LoaderCircle,
   Pause,
   Play,
-  Radio,
   RotateCcw,
   ScanLine,
   Settings2,
@@ -29,6 +27,7 @@ import {
   X,
   Armchair,
   Activity,
+  DoorOpen,
 } from "lucide-react";
 import type { Direction, Observation, Preferences } from "./contracts";
 import { defaults } from "./contracts";
@@ -42,6 +41,7 @@ import {
 } from "./vision";
 import { api } from "./api";
 import { newReport, XRProbe } from "./probe";
+import GateScan from "./GateScan";
 
 function readPreferences(): Preferences {
   try {
@@ -88,8 +88,8 @@ function App() {
             <NavLink to="/probe">
               <Activity size={17} /> Device check
             </NavLink>
-            <NavLink to="/guide">
-              <CircleHelp size={17} /> Quick guide
+            <NavLink to="/gates">
+              <DoorOpen size={17} /> Gates & doors
             </NavLink>
           </nav>
           <span className="guest">
@@ -101,6 +101,7 @@ function App() {
         <Route path="/" element={<Sensing />} />
         <Route path="/probe" element={<Probe />} />
         <Route path="/guide" element={<Guide />} />
+        <Route path="/gates" element={<GateScan />} />
         <Route path="*" element={<Guide />} />
       </Routes>
       <footer>
@@ -705,6 +706,14 @@ function Sensing() {
               </Link>
             </div>
           </section>
+          <Link to="/gates" className="gate-entry">
+            <DoorOpen size={23} />
+            <span>
+              <strong>Looking for a gate or door?</strong>
+              <small>Check an image and hear its direction.</small>
+            </span>
+            <ChevronRight size={18} />
+          </Link>
           <section className="panel listening">
             <div className="panel-heading">
               <h2>
@@ -1116,6 +1125,12 @@ function Guide() {
         <p>
           This prototype recognises people, chairs, and backpacks. It can miss
           or misidentify objects. No detections never means a clear path.
+        </p>
+        <p>
+          The Gates & doors page checks a captured image locally for gates,
+          doors, and possible exit signs. It announces candidate directions
+          without confirming that an opening is a usable exit. First use
+          downloads an additional model of about 204 MB plus runtime files.
         </p>
         <p>
           Directions are camera-relative. There is no head tracking, awareness

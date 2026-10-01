@@ -91,6 +91,19 @@ afterEach(() => {
 });
 
 describe("audio cancellation across scene changes", () => {
+  it("speaks the qualified snapshot wording for a gate check and allows Pause to cancel it", async () => {
+    const guide = new AudioGuide();
+    const onText = vi.fn();
+    const phrase = "Possible gate, left, in this image. Exit unconfirmed.";
+    await guide.unlock();
+    guide.say(item({ label: "gate" }), prefs, onText, phrase);
+    vi.advanceTimersByTime(260);
+    expect(spoken.map((utterance) => utterance.text)).toEqual([phrase]);
+    expect(onText).toHaveBeenCalledWith(phrase);
+    guide.cancel();
+    expect(cancelSpeech).toHaveBeenCalled();
+  });
+
   it("pause stops a pending tone and prevents its delayed spoken label; resume permits the same observation", async () => {
     const guide = new AudioGuide();
     const onText = vi.fn();

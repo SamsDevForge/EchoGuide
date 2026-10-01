@@ -1378,3 +1378,127 @@ select {
 input[type="range"] {
   min-height: 32px;
 }
+.gate-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid #cbd8c2;
+  border-radius: 14px;
+  color: #274e35;
+  background: #f0f5ea;
+  text-decoration: none;
+}
+.gate-entry > svg {
+  flex-shrink: 0;
+}
+.gate-entry > span {
+  flex: 1;
+}
+.gate-entry strong,
+.gate-entry small {
+  display: block;
+}
+.gate-entry strong {
+  font-size: 14px;
+}
+.gate-entry small {
+  margin-top: 5px;
+  font-size: 12px;
+  color: #56674e;
+}
+.gate-page .panel {
+  margin-top: 22px;
+}
+.gate-download-note,
+.gate-state {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #53684b;
+}
+.gate-image {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #112d22;
+}
+.gate-image img,
+.gate-image video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.gate-placeholder {
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #d3e5d1;
+}
+.gate-placeholder p {
+  margin: 15px 0 5px;
+}
+.gate-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+.gate-controls .button {
+  min-height: 48px;
+}
+.gate-page progress {
+  width: 100%;
+  accent-color: #456c36;
+}
+.gate-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid #dce5d6;
+  padding-top: 16px;
+  margin-top: 18px;
+}
+.gate-examples > span {
+  width: 100%;
+  font-size: 12px;
+  color: #53684b;
+}
+.gate-examples .button {
+  min-height: 44px;
+}
+.gate-credit {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #53684b;
+}
+.gate-results h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gate-results .object-row {
+  margin-top: 12px;
+}
+.gate-results .note {
+  margin-top: 18px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .gate-controls .button {
+    flex: 1 1 auto;
+  }
+  .gate-controls .primary {
+    flex-basis: 100%;
+  }
+  .gate-results .object-row {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .gate-results .object-row .direction {
+    margin-left: auto;
+  }
+}

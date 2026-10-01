@@ -2,6 +2,8 @@
 
 **Hear what’s here.** A single-device, account-free object-awareness prototype for an AI for Smart Mobility hackathon. Point the rear camera forward; local detection identifies **people, chairs, and backpacks**, then plays a left / centre / right tone followed by a short spoken label.
 
+**Gates & doors** checks a deliberately captured camera image or selected photo for **gates, building doors, and possible exit signs** using a separate local detector. It announces, for example, “Possible gate, left, in this image. Exit unconfirmed.” A visual opening cannot establish that a gate is unlocked or that a door leads to an exit.
+
 **[Open EchoGuide](https://SamsDevForge.github.io/EchoGuide/)** · **[Device capability check](https://SamsDevForge.github.io/EchoGuide/probe)** · [Demo script](docs/SUBMISSION.md) · [Test record](docs/TESTING.md)
 
 This is a stationary, supervised indoor demonstration. It can miss or misidentify objects. It does not certify a route safe, provide road-crossing guidance, or infer a clear path from missing detections.
@@ -18,7 +20,7 @@ npm run models
 npm run dev
 ```
 
-Open **http://localhost:5173**. The API runs on port 3001. **No account, database, API key, or `.env` file is required for camera sensing, audio, preferences, or the capability probe.** The first model preparation downloads the official pretrained model and copies MediaPipe WASM locally. Initial startup takes a few seconds.
+Open **http://localhost:5173**. The API runs on port 3001. **No account, database, API key, or `.env` file is required for camera sensing, gate/door checks, audio, preferences, or the capability probe.** Model preparation downloads EfficientDet-Lite0 and the pinned quantized Grounding DINO Tiny model, then copies their browser runtimes locally. The gate model is approximately 204 MB, with additional runtime files; allow time and a reliable connection for preparation. Large binaries are generated assets, not committed to Git.
 
 ```sh
 npm run typecheck
@@ -36,9 +38,14 @@ An ordinary `http://<computer LAN IP>:5173` link does **not** give Android Chrom
 
 The audio demo is explicitly marked as sample data and never mixed with live results. Disable Android’s mono-audio setting for stereo cues. The app cannot detect which audio output device Android selected; confirm by listening.
 
+To look for an opening, select **Gates & doors**, open the rear camera, point at a gate or building door, and tap **Capture & check**. Alternatively choose **Use a photo**, then **Check this image**. The first browser check downloads the model from this app’s origin; subsequent checks can reuse the browser cache. The image is processed in a local worker and is not uploaded. Directions describe the captured image, so capture again after moving the phone. **Cancel check / Pause** stops inference and audio. Recognition may miss openings or confuse fences/windows with gates/doors; “no candidate” does not mean “no exit.” An exit-sign candidate does not verify its text or arrow.
+
+**Try gate example / Try door example** loads labelled demonstration photos so the complete local check can be reproduced without camera access. The screen and spoken result identify these as example photos. These are individual smoke tests, not accuracy benchmarks. Photo authors and licences appear in the app and in [`client/public/examples/ATTRIBUTION.md`](client/public/examples/ATTRIBUTION.md); the photos retain their own licences.
+
 ## What works and what remains
 
 - Local MediaPipe EfficientDet-Lite0 detection, a rear-camera preview, normalised boxes, lightweight tracking, and camera-relative directions.
+- Local Grounding DINO Tiny gate/door/exit-sign candidate checks on camera captures or photos, normalised boxes, qualified directional speech, cancellation and loading/error states.
 - Start/Pause, stopped-camera handling, background pause, stereo calibration, repeat, adjustable volume/pace, and optional HRTF tones.
 - An XR capability probe requesting raw camera access and CPU depth in the **same** session, reading actual camera pixels and depth, with copyable diagnostics.
 - Optional Express Gemini scene descriptions and optional PostgreSQL/JWT/bcrypt account APIs. The primary UI uses local preferences and guest access.
@@ -58,6 +65,9 @@ Rear camera → VideoProvider → MediaPipe (local, ~3 frames/sec target)
 
 Device check → independent XR session → raw camera shader/readPixels + CPU depth
 
+Gates & doors → deliberate camera capture / photo → Grounding DINO Tiny q8 (local worker)
+             → filtered candidate boxes → image-relative tone + qualified speech
+
 Explicit Describe scene → one JPEG → Express → Gemini → text description
 ```
 
@@ -65,6 +75,7 @@ Explicit Describe scene → one JPEG → Express → Gemini → text description
 - `vision.ts`: the detector consumes the full intrinsic camera frame without crop or mirroring. Bounding boxes are normalised against that frame. Preview follows its changing aspect ratio and uses `object-fit: contain`. Camera-left is x < .38; camera-right is x > .62. The provider uses no fixed landscape assumptions, and rejects unchanged/frozen frames rather than refreshing stale detections.
 - `Tracker`: matching labels and box overlap associate observations; detections missing from the current frame are dropped immediately. Tracks expire after 1.5 seconds. There is no inference queue; processing uses the latest frame at a modest target rate.
 - `audio.ts`: left = stereo pan -1, centre = 0, right = +1. A short tone precedes ordinary, unpanned speech because browser speech cannot be routed through Web Audio. A changed scene or Pause cancels pending cues and speech. Meaningfully unchanged objects are suppressed. Pace is a minimum interval, not a promise of an announcement every N seconds.
+- `GateScan.tsx`, `gate.worker.ts`, `gates.ts`: one captured-image request at a time, WASM inference on one worker thread, with local model/runtime paths and remote model fetching disabled. A local caption queries gates, doors and exit signs plus fence/window/wall alternatives. Scores below .25, invalid/tiny boxes and duplicates are rejected; higher-scoring overlapping alternatives suppress opening candidates. These scores are model similarities, not calibrated probabilities. No snapshot result becomes a live observation or metric distance. Pause/background/navigation stops the worker and cancels speech. The model revision is pinned in `scripts/prepare-assets.mjs`.
 - `probe.ts`: requires `camera-access` and `depth-sensing` together. It samples the browser-owned texture into an application-owned framebuffer before readback. Pixel variation is evidence of readback, **not** proof of detector alignment. `getDepthInMeters` applies the API’s normalised-view-to-depth transform; raw buffers are never indexed as if they were camera pixels. Multiple centre samples reject missing and mixed depth. Optical-axis depth and Euclidean range are distinct; range utilities are tested but not used for live estimates.
 - `server/`: strict validation, bounded JPEG payloads, server-side API key, timeout, rate limiting, optional PostgreSQL preferences scoped to verified JWT subjects. Camera images are not stored or logged.
 
@@ -99,6 +110,7 @@ For Netlify or Vercel, use the included configuration. For the optional API on R
 ## Attribution and sources
 
 - [MediaPipe Tasks Vision](https://ai.google.dev/edge/mediapipe/solutions/vision/object_detector/web_js), Google, Apache-2.0. Official [EfficientDet-Lite0 model documentation](https://ai.google.dev/edge/mediapipe/solutions/vision/object_detector) and [Google model asset](https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite). COCO labels include `person`, `chair`, and `backpack`; runtime requests these labels only.
+- [Grounding DINO Tiny](https://huggingface.co/IDEA-Research/grounding-dino-tiny) by IDEA Research and [the ONNX Community conversion](https://huggingface.co/onnx-community/grounding-dino-tiny-ONNX), Apache-2.0; [Transformers.js](https://github.com/huggingface/transformers.js), Apache-2.0, and [ONNX Runtime](https://github.com/microsoft/onnxruntime), MIT. Gate assets use revision `ff690b0a8050566c290287545bd059350f3e9096` and `onnx/model_quantized.onnx`.
 - [WebXR Raw Camera Access specification](https://immersive-web.github.io/raw-camera-access/), [WebXR Depth Sensing specification](https://www.w3.org/TR/webxr-depth-sensing-1/), and [Google’s ARCore device list](https://developers.google.com/ar/devices). Nord CE5 is listed for Depth API; browser compatibility and phone behaviour require separate tests.
 - [Gemini generateContent API](https://ai.google.dev/api/generate-content).
 - React, Vite, React Router, Tailwind CSS, Express, Zod, and the other dependencies retain their respective licences. [Lucide icons](https://lucide.dev/license), ISC.

@@ -11,3 +11,5 @@ artifacts/
 *.tsbuildinfo
 client/public/vision/
 client/public/models/
+client/public/gate-models/
+client/public/gate-runtime/
