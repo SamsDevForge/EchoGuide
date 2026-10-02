@@ -10,11 +10,11 @@ Device check: https://samsdevforge.github.io/EchoGuide/probe
 
 - Guest mobile workflow with one local detector for people, chairs, backpacks, gates and building doors.
 - Automatic gate/door directional announcements in Start sensing; no capture/check workflow, account or API key required. Startup, pause and failure guidance are spoken.
-- Camera-relative stereo tones followed by short browser speech, calibration, Repeat, volume/pace preferences, and immediate Pause.
+- Softer camera-relative stereo tones followed by gentle browser speech, installed voice selection/preview, speaking speed, calibration, Repeat, volume/pace preferences, and immediate Pause.
 - Live boxes and observation tracking, expiry, scene-change cancellation, camera-start cancellation, and background pause.
-- Capability probe for rear camera, simultaneous XR raw camera/depth, actual readback and depth samples, and copied diagnostics.
+- Optional depth check with required depth and optional raw camera access, CPU samples or GPU buffer availability, tracking/error diagnostics, automatic completion, and cancellation. Its depth is never mixed with a separate camera stream.
 - Separate labelled audio demonstration for unsupported devices.
-- Optional backend Gemini scene descriptions, PostgreSQL/JWT/bcrypt account APIs, validation, limits, and timeouts.
+- Private local Gemini scene descriptions with spoken results, one-address frontend/API serving, PostgreSQL/JWT/bcrypt account APIs, validation, limits, and timeouts.
 - Reproducible npm lockfile/setup, deployment workflow, architecture and attribution, demo script and recording checklist.
 
 ## Verified locally on 2 October 2026
@@ -30,10 +30,10 @@ Device check: https://samsdevforge.github.io/EchoGuide/probe
 
 ## Remaining or deliberately unavailable
 
-- Actual Nord CE5 camera/CV performance, earbud channel separation, measured latency, sustained-session behaviour and XR capabilities await physical testing.
+- User reported depth failures on Nord CE5 and other tested phones on 2 October 2026. The revised depth check has not yet passed on those phones; exact browser/runtime failure remains unresolved without copied diagnostics. Camera/CV performance, earbud separation, latency and sustained-session behaviour remain unverified.
 - First browser use loads the single 38.2 MB model plus about 26.8 MB of runtime. Phone accuracy and speed await physical testing. A gate/door match does not confirm an exit, unlock state or route; exit signs/text/arrows are not classified.
 - Live object distance is unavailable. Same-session centre depth is diagnostic only; no aligned object-depth provider is enabled.
-- Gemini and real PostgreSQL are unverified without credentials. The single-device workflow requires neither. The scene-description control is hidden when Gemini is unavailable.
+- Gemini returned a real scene description through the local backend with the user-supplied key. The key remains in the ignored local environment file. GitHub Pages has no backend, so the public app's scene control remains hidden until an HTTPS backend is configured. Real PostgreSQL remains unconfigured; accounts are not needed.
 - No native Android module, PWA offline cache, head tracking, or comprehensive obstacle detection.
 
 To recreate locally: `git clone`, `npm ci`, `npm run models`, `npm run dev`. The README contains complete commands and optional configuration.

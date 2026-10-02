@@ -22,11 +22,15 @@ export interface Preferences {
   volume: number;
   announcementIntervalMs: number;
   spatialMode: "stereo" | "hrtf";
+  voiceURI?: string;
+  speechRate?: number;
 }
 export const defaults: Preferences = {
   volume: 0.55,
   announcementIntervalMs: 5000,
   spatialMode: "stereo",
+  voiceURI: "",
+  speechRate: 0.9,
 };
 export interface ProviderFrame {
   image: HTMLVideoElement | HTMLCanvasElement;

@@ -1,5 +1,41 @@
 import type { Observation, Preferences, Direction } from "./contracts";
 import { TRACK_TTL } from "./vision";
+import { selectGuidanceVoice } from "./voices";
+
+function speechRate(prefs: Preferences): number {
+  const rate = prefs.speechRate ?? 0.9;
+  return Number.isFinite(rate) ? Math.max(0.8, Math.min(1.1, rate)) : 0.9;
+}
+
+function guidanceUtterance(
+  text: string,
+  prefs: Preferences,
+): SpeechSynthesisUtterance | null {
+  let voices: SpeechSynthesisVoice[] = [];
+  try {
+    voices = window.speechSynthesis.getVoices?.() ?? [];
+  } catch {
+    // Enumeration can fail before the browser's voice engine is ready.
+  }
+  // Prefer local English speech. A local voice in another language is still
+  // preferable to silence; if no local voice exists, retain the browser's
+  // default speech behavior rather than explicitly choosing a remote voice.
+  const voice =
+    selectGuidanceVoice(voices, prefs.voiceURI) ??
+    voices.find(
+      (candidate) => candidate.localService === true && candidate.default,
+    ) ??
+    voices.find((candidate) => candidate.localService === true) ??
+    null;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.volume = prefs.volume;
+  utterance.rate = speechRate(prefs);
+  utterance.pitch = 1;
+  utterance.lang =
+    voice && /^en(?:[-_]|$)/i.test(voice.lang) ? voice.lang : "en-US";
+  if (voice) utterance.voice = voice;
+  return utterance;
+}
 export function phraseFor(o: Observation) {
   return `${o.label === "gate" || o.label === "door" ? "Possible " : ""}${o.label}, ${o.direction}${o.depthState === "valid" && o.distanceMetres !== null ? `, about ${(Math.round(o.distanceMetres * 2) / 2).toFixed(1)} metres` : ""}.`;
 }
@@ -15,7 +51,13 @@ export class AnnouncementGate {
     for (const key of this.spoken.keys())
       if (!ids.has(key)) this.spoken.delete(key);
     if (now - this.lastAt < interval) return null;
-    const item = [...fresh].sort((a, b) => Number(b.label === "gate" || b.label === "door") - Number(a.label === "gate" || a.label === "door")).find((o) => this.spoken.get(o.trackId) !== signature(o));
+    const item = [...fresh]
+      .sort(
+        (a, b) =>
+          Number(b.label === "gate" || b.label === "door") -
+          Number(a.label === "gate" || a.label === "door"),
+      )
+      .find((o) => this.spoken.get(o.trackId) !== signature(o));
     if (item) {
       this.lastAt = now;
       this.spoken.set(item.trackId, signature(item));
@@ -49,8 +91,11 @@ export class AudioGuide {
     if (!("speechSynthesis" in window)) return;
     this.busy = true;
     const generation = this.generation;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.volume = prefs.volume;
+    const utterance = guidanceUtterance(text, prefs);
+    if (!utterance) {
+      this.busy = false;
+      return;
+    }
     utterance.onend = utterance.onerror = () => {
       if (generation === this.generation) this.busy = false;
     };
@@ -83,12 +128,12 @@ export class AudioGuide {
     osc.frequency.value = direction === "centre" ? 660 : 520;
     gain.gain.setValueAtTime(0, ctx.currentTime);
     gain.gain.linearRampToValueAtTime(
-      prefs.volume * 0.22,
-      ctx.currentTime + 0.02,
+      prefs.volume * 0.17,
+      ctx.currentTime + 0.03,
     );
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
     osc.start();
-    osc.stop(ctx.currentTime + 0.22);
+    osc.stop(ctx.currentTime + 0.3);
     this.oscillator = osc;
     osc.onended = () => {
       osc.disconnect();
@@ -120,9 +165,11 @@ export class AudioGuide {
         this.busy = false;
         return;
       }
-      const utterance = new SpeechSynthesisUtterance(phrase);
-      utterance.volume = prefs.volume;
-      utterance.rate = 1;
+      const utterance = guidanceUtterance(phrase, prefs);
+      if (!utterance) {
+        this.busy = false;
+        return;
+      }
       utterance.onend = utterance.onerror = () => {
         if (generation === this.generation) this.busy = false;
       };

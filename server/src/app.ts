@@ -10,6 +10,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { Pool } from "pg";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   PostgresRepository,
   type Repository,
@@ -22,6 +24,7 @@ export interface AppOptions {
   repository?: Repository;
   fetcher?: typeof fetch;
   disableRateLimit?: boolean;
+  frontendDir?: string;
 }
 const credentialsSchema = z
   .object({
@@ -65,8 +68,28 @@ export function createApp(options: AppOptions = {}) {
     );
   }
   const app = express();
+  const frontend =
+    options.frontendDir && existsSync(join(options.frontendDir, "index.html"))
+      ? options.frontendDir
+      : null;
   app.disable("x-powered-by");
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: frontend
+        ? {
+            directives: {
+              scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
+              workerSrc: ["'self'", "blob:"],
+              mediaSrc: ["'self'", "blob:"],
+              connectSrc: ["'self'"],
+              // localhost is the intended single-device camera origin; it has no TLS listener.
+              upgradeInsecureRequests:
+                env.NODE_ENV === "production" ? [] : null,
+            },
+          }
+        : undefined,
+    }),
+  );
   app.use(cors({ origin: env.CLIENT_ORIGIN ?? "http://localhost:5173" }));
   app.use(express.json({ limit: "1500kb" }));
   const accountsRequired = (
@@ -75,12 +98,10 @@ export function createApp(options: AppOptions = {}) {
     next: NextFunction,
   ) => {
     if (!repository) {
-      res
-        .status(503)
-        .json({
-          error:
-            "Accounts are unavailable. Configure DATABASE_URL and JWT_SECRET on the server.",
-        });
+      res.status(503).json({
+        error:
+          "Accounts are unavailable. Configure DATABASE_URL and JWT_SECRET on the server.",
+      });
       return;
     }
     next();
@@ -110,21 +131,17 @@ export function createApp(options: AppOptions = {}) {
         throw new Error();
       userId = payload.sub;
     } catch {
-      res
-        .status(401)
-        .json({
-          error: "Your session is invalid or expired. Please sign in again.",
-        });
+      res.status(401).json({
+        error: "Your session is invalid or expired. Please sign in again.",
+      });
       return;
     }
     try {
       const user = await repository!.findUserById(userId);
       if (!user) {
-        res
-          .status(401)
-          .json({
-            error: "Your session is invalid or expired. Please sign in again.",
-          });
+        res.status(401).json({
+          error: "Your session is invalid or expired. Please sign in again.",
+        });
         return;
       }
       res.locals.userId = user.id;
@@ -247,12 +264,10 @@ export function createApp(options: AppOptions = {}) {
   app.post("/api/scene", async (req, res) => {
     const input = sceneSchema.parse(req.body);
     if (!env.GEMINI_API_KEY) {
-      res
-        .status(503)
-        .json({
-          error:
-            "Scene descriptions are unavailable. Configure GEMINI_API_KEY on the server.",
-        });
+      res.status(503).json({
+        error:
+          "Scene descriptions are unavailable. Configure GEMINI_API_KEY on the server.",
+      });
       return;
     }
     res.json({
@@ -264,21 +279,33 @@ export function createApp(options: AppOptions = {}) {
       ),
     });
   });
+  if (frontend) {
+    app.use(express.static(frontend, { dotfiles: "deny", index: false }));
+    app.use((req, res, next) => {
+      // A missing API/model/asset must not receive HTML pretending to be a result.
+      if (
+        (req.method === "GET" || req.method === "HEAD") &&
+        !/^\/api(?:\/|$)/.test(req.path) &&
+        !req.path.includes(".") &&
+        req.accepts("html")
+      ) {
+        res.sendFile(join(frontend, "index.html"));
+      } else next();
+    });
+  }
   app.use((_req, res) =>
     res.status(404).json({ error: "API endpoint not found." }),
   );
   app.use(
     (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
       if (error instanceof z.ZodError) {
-        res
-          .status(400)
-          .json({
-            error: "Invalid request.",
-            details: error.issues.map((issue) => ({
-              field: issue.path.join("."),
-              message: issue.message,
-            })),
-          });
+        res.status(400).json({
+          error: "Invalid request.",
+          details: error.issues.map((issue) => ({
+            field: issue.path.join("."),
+            message: issue.message,
+          })),
+        });
         return;
       }
       if (error instanceof SceneServiceError) {
@@ -287,11 +314,9 @@ export function createApp(options: AppOptions = {}) {
       }
       if (typeof error === "object" && error !== null && "type" in error) {
         if (error.type === "entity.too.large") {
-          res
-            .status(413)
-            .json({
-              error: "Request is too large. Use a JPEG of at most 1 MiB.",
-            });
+          res.status(413).json({
+            error: "Request is too large. Use a JPEG of at most 1 MiB.",
+          });
           return;
         }
         if (error.type === "entity.parse.failed") {
@@ -300,12 +325,9 @@ export function createApp(options: AppOptions = {}) {
         }
       }
       // Never log request bodies, image data, passwords, or upstream responses.
-      res
-        .status(503)
-        .json({
-          error:
-            "The server could not complete this request. Please try again.",
-        });
+      res.status(503).json({
+        error: "The server could not complete this request. Please try again.",
+      });
     },
   );
   return app;

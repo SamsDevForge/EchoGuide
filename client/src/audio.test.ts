@@ -36,6 +36,9 @@ class MockOscillator extends MockNode {
 class MockUtterance {
   volume = 1;
   rate = 1;
+  pitch = 1;
+  lang = "";
+  voice: SpeechSynthesisVoice | null = null;
   onend: (() => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(public text: string) {}
@@ -43,6 +46,20 @@ class MockUtterance {
 let oscillators: MockOscillator[];
 let spoken: MockUtterance[];
 let cancelSpeech: ReturnType<typeof vi.fn>;
+let installedVoices: SpeechSynthesisVoice[];
+const voice = (
+  name: string,
+  localService = true,
+  lang = "en-US",
+  isDefault = false,
+): SpeechSynthesisVoice =>
+  ({
+    name,
+    voiceURI: name,
+    lang,
+    localService,
+    default: isDefault,
+  }) as SpeechSynthesisVoice;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -50,11 +67,13 @@ beforeEach(() => {
   vi.setSystemTime(1_000_000);
   oscillators = [];
   spoken = [];
+  installedVoices = [];
   cancelSpeech = vi.fn();
   vi.stubGlobal("window", {
     speechSynthesis: {
       speak: vi.fn((utterance: MockUtterance) => spoken.push(utterance)),
       cancel: cancelSpeech,
+      getVoices: vi.fn(() => installedVoices),
     },
   });
   vi.stubGlobal("SpeechSynthesisUtterance", MockUtterance);
@@ -96,7 +115,10 @@ describe("audio cancellation across scene changes", () => {
   it("keeps a normal CPU-result cue audible while newer frames are arriving", async () => {
     const guide = new AudioGuide();
     await guide.unlock();
-    const opening = item({ label: "gate", timestamp: performance.now() - 1120 });
+    const opening = item({
+      label: "gate",
+      timestamp: performance.now() - 1120,
+    });
     guide.update([opening], prefs, vi.fn());
     vi.advanceTimersByTime(260);
     expect(spoken[0].text).toBe("Possible gate, left.");
@@ -112,7 +134,11 @@ describe("audio cancellation across scene changes", () => {
   it("cancels a label if its frame expires between the tone and speech", async () => {
     const guide = new AudioGuide();
     await guide.unlock();
-    guide.update([item({ label: "door", timestamp: performance.now() - TRACK_TTL + 200 })], prefs, vi.fn());
+    guide.update(
+      [item({ label: "door", timestamp: performance.now() - TRACK_TTL + 200 })],
+      prefs,
+      vi.fn(),
+    );
     vi.advanceTimersByTime(260);
     expect(spoken).toHaveLength(0);
   });
@@ -120,25 +146,52 @@ describe("audio cancellation across scene changes", () => {
     const guide = new AudioGuide();
     const tracker = new Tracker();
     await guide.unlock();
-    const observe = (label: string, x: number, score = .8) => liveCandidates([
-      { label, score, box: { xmin: x, ymin: .1, xmax: x + .2, ymax: .8 } },
-      { label: "person", score: .95, box: { xmin: .75, ymin: .1, xmax: .95, ymax: .8 } },
-    ], performance.now());
-    guide.update(tracker.update(observe("gate", .05), performance.now()), prefs, vi.fn());
+    const observe = (label: string, x: number, score = 0.8) =>
+      liveCandidates(
+        [
+          {
+            label,
+            score,
+            box: { xmin: x, ymin: 0.1, xmax: x + 0.2, ymax: 0.8 },
+          },
+          {
+            label: "person",
+            score: 0.95,
+            box: { xmin: 0.75, ymin: 0.1, xmax: 0.95, ymax: 0.8 },
+          },
+        ],
+        performance.now(),
+      );
+    guide.update(
+      tracker.update(observe("gate", 0.05), performance.now()),
+      prefs,
+      vi.fn(),
+    );
     vi.advanceTimersByTime(260);
     expect(spoken[0].text).toBe("Possible gate, left.");
     spoken[0].onend!();
     vi.advanceTimersByTime(2000);
-    guide.update(tracker.update(observe("door", .4), performance.now()), prefs, vi.fn());
+    guide.update(
+      tracker.update(observe("door", 0.4), performance.now()),
+      prefs,
+      vi.fn(),
+    );
     vi.advanceTimersByTime(260);
-    expect(spoken.map(utterance => utterance.text)).toEqual(["Possible gate, left.", "Possible door, centre."]);
+    expect(spoken.map((utterance) => utterance.text)).toEqual([
+      "Possible gate, left.",
+      "Possible door, centre.",
+    ]);
     guide.cancel();
   });
 
   it("never speaks an opening from an expired frame", async () => {
     const guide = new AudioGuide();
     await guide.unlock();
-    guide.update([item({label: "door", timestamp: performance.now() - TRACK_TTL - 100})], prefs, vi.fn());
+    guide.update(
+      [item({ label: "door", timestamp: performance.now() - TRACK_TTL - 100 })],
+      prefs,
+      vi.fn(),
+    );
     vi.advanceTimersByTime(1000);
     expect(spoken).toHaveLength(0);
   });
@@ -150,11 +203,65 @@ describe("audio cancellation across scene changes", () => {
     guide.status("Sensing started.", prefs, text);
     expect(spoken[0].text).toBe("Sensing started.");
     spoken[0].onend!();
-    guide.update([item({label: "gate"})], prefs, text);
+    guide.update([item({ label: "gate" })], prefs, text);
     guide.status("Sensing paused.", prefs, text);
     vi.advanceTimersByTime(1000);
-    expect(spoken.map(utterance => utterance.text)).toEqual(["Sensing started.", "Sensing paused."]);
-    expect(spoken.every(utterance => utterance.volume === prefs.volume)).toBe(true);
+    expect(spoken.map((utterance) => utterance.text)).toEqual([
+      "Sensing started.",
+      "Sensing paused.",
+    ]);
+    expect(spoken.every((utterance) => utterance.volume === prefs.volume)).toBe(
+      true,
+    );
+    expect(
+      spoken.every(
+        (utterance) =>
+          utterance.rate === 0.9 &&
+          utterance.pitch === 1 &&
+          utterance.lang === "en-US",
+      ),
+    ).toBe(true);
+    guide.cancel();
+  });
+
+  it("uses a newly loaded local voice for later speech and keeps status and observations at the chosen rate", async () => {
+    const guide = new AudioGuide();
+    await guide.unlock();
+    guide.status("Ready.", prefs, vi.fn());
+    expect(spoken[0].voice).toBeNull();
+    spoken[0].onend!();
+    const installed = voice("Natural Local");
+    installedVoices.push(installed);
+    const calmer = { ...prefs, voiceURI: installed.voiceURI, speechRate: 0.85 };
+    guide.update([item()], calmer, vi.fn());
+    vi.advanceTimersByTime(260);
+    expect(spoken[1].voice).toBe(installed);
+    expect(spoken[1].rate).toBe(0.85);
+    spoken[1].onend!();
+    guide.status("Paused.", calmer, vi.fn());
+    expect(spoken[2].voice).toBe(installed);
+    expect(spoken[2].rate).toBe(0.85);
+    guide.cancel();
+  });
+
+  it("speaks with a local default voice if no local English voice exists", () => {
+    const localFrench = voice("Local French", true, "fr-FR", true);
+    installedVoices.push(voice("Remote Natural", false), localFrench);
+    const guide = new AudioGuide();
+    guide.status("Ready.", prefs, vi.fn());
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0].voice).toBe(localFrench);
+    expect(spoken[0].lang).toBe("en-US");
+    guide.cancel();
+  });
+
+  it("uses browser default speech when only remote voices are enumerated", () => {
+    installedVoices.push(voice("Remote Natural", false));
+    const guide = new AudioGuide();
+    guide.status("Ready.", prefs, vi.fn());
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0].voice).toBeNull();
+    expect(spoken[0].lang).toBe("en-US");
     guide.cancel();
   });
   it("speaks the qualified example wording and allows Pause to cancel it", async () => {

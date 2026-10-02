@@ -32,10 +32,11 @@ import {
 import type { Direction, Observation, Preferences } from "./contracts";
 import { defaults } from "./contracts";
 import { AudioGuide } from "./audio";
+import { availableGuidanceVoices, selectGuidanceVoice } from "./voices";
 import { Tracker, TRACK_TTL, VideoProvider } from "./vision";
 import { LiveVision, LIVE_LABELS } from "./liveVision";
 import { api } from "./api";
-import { newReport, XRProbe } from "./probe";
+import { depthFailure, newReport, XRProbe } from "./probe";
 import GateScan from "./GateScan";
 
 function readPreferences(): Preferences {
@@ -52,10 +53,28 @@ function readPreferences(): Preferences {
         ? p.announcementIntervalMs
         : defaults.announcementIntervalMs,
       spatialMode: p.spatialMode === "hrtf" ? "hrtf" : "stereo",
+      voiceURI:
+        typeof p.voiceURI === "string" && p.voiceURI.length < 300
+          ? p.voiceURI
+          : "",
+      speechRate: [0.8, 0.9, 1, 1.1].includes(p.speechRate)
+        ? p.speechRate
+        : defaults.speechRate,
     };
   } catch {
     return defaults;
   }
+}
+function useGuidanceVoices() {
+  const [voices, setVoices] = useState(availableGuidanceVoices);
+  useEffect(() => {
+    const refresh = () => setVoices(availableGuidanceVoices());
+    const synthesis = window.speechSynthesis;
+    synthesis?.addEventListener("voiceschanged", refresh);
+    refresh();
+    return () => synthesis?.removeEventListener("voiceschanged", refresh);
+  }, []);
+  return voices;
 }
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong. Please try again.";
@@ -229,6 +248,8 @@ function Sensing() {
   const [error, setError] = useState("");
   const [objects, setObjects] = useState<Observation[]>([]);
   const [prefs, setPrefs] = useState(readPreferences);
+  const voices = useGuidanceVoices();
+  const selectedVoice = selectGuidanceVoice(voices, prefs.voiceURI);
   const prefRef = useRef(prefs);
   const [calibrate, setCalibrate] = useState(false);
   const [announcement, setAnnouncement] = useState(
@@ -240,7 +261,9 @@ function Sensing() {
   const [diagnostics, setDiagnostics] = useState(false);
   const [gemini, setGemini] = useState(false);
   const [aspect, setAspect] = useState(4 / 3);
-  const [loadingMessage, setLoadingMessage] = useState("Getting sensing ready…");
+  const [loadingMessage, setLoadingMessage] = useState(
+    "Getting sensing ready…",
+  );
   const [device, setDevice] = useState<string | null>(null);
   useEffect(() => {
     prefRef.current = prefs;
@@ -270,6 +293,7 @@ function Sensing() {
     setState("paused");
     setAnnouncement(message);
     setInference(null);
+    setDescribing(false);
   }
   useEffect(() => {
     const hidden = () => {
@@ -300,18 +324,28 @@ function Sensing() {
     try {
       await audio.current.unlock();
       if (token !== generation.current) return;
-      audio.current.status("Starting sensing. Allow camera access if asked.", prefRef.current, setAnnouncement);
+      audio.current.status(
+        "Starting sensing. Allow camera access if asked.",
+        prefRef.current,
+        setAnnouncement,
+      );
       if (!video.current) throw new Error("Camera preview unavailable.");
-      const localDetector = new LiveVision(message => {
+      const localDetector = new LiveVision((message) => {
         if (token === generation.current) setLoadingMessage(message);
       });
       detector.current = localDetector;
       let cameraReady = false;
-      const cameraStart = camera.start(video.current).then(() => { cameraReady = true; });
+      const cameraStart = camera.start(video.current).then(() => {
+        cameraReady = true;
+      });
       const modelStart = localDetector.load().then(() => {
         if (token === generation.current && !cameraReady) {
           setLoadingMessage("Please allow camera access in your browser.");
-          audio.current.status("Please allow camera access in your browser.", prefRef.current, setAnnouncement);
+          audio.current.status(
+            "Please allow camera access in your browser.",
+            prefRef.current,
+            setAnnouncement,
+          );
         }
       });
       await Promise.all([cameraStart, modelStart]);
@@ -330,7 +364,11 @@ function Sensing() {
           if (running.current) {
             pause("Camera interrupted. Tap Start to reconnect.");
             setError("Camera access ended.");
-            audio.current.status("Camera interrupted. Tap Start to reconnect.", prefRef.current, setAnnouncement);
+            audio.current.status(
+              "Camera interrupted. Tap Start to reconnect.",
+              prefRef.current,
+              setAnnouncement,
+            );
           }
         },
         { once: true },
@@ -338,7 +376,11 @@ function Sensing() {
       setAspect(video.current.videoWidth / video.current.videoHeight || 4 / 3);
       running.current = true;
       setState("live");
-      audio.current.status("Sensing started.", prefRef.current, setAnnouncement);
+      audio.current.status(
+        "Sensing started.",
+        prefRef.current,
+        setAnnouncement,
+      );
       let last = 0;
       let lastFrameAt = performance.now();
       let checking = false;
@@ -348,7 +390,9 @@ function Sensing() {
         frameId.current = requestAnimationFrame(loop);
         if (time - last < 300) return;
         last = time;
-        latest.current = latest.current.filter(o => time - o.timestamp <= TRACK_TTL);
+        latest.current = latest.current.filter(
+          (o) => time - o.timestamp <= TRACK_TTL,
+        );
         setObjects(latest.current);
         audio.current.update(latest.current, prefRef.current, setAnnouncement);
         const frame = camera.frame();
@@ -361,7 +405,11 @@ function Sensing() {
           if (time - lastFrameAt > 5000) {
             pause("Camera stopped providing frames. Tap Start to retry.");
             setError("Camera stream interrupted.");
-            audio.current.status("Camera interrupted. Tap Start to reconnect.", prefRef.current, setAnnouncement);
+            audio.current.status(
+              "Camera interrupted. Tap Start to reconnect.",
+              prefRef.current,
+              setAnnouncement,
+            );
           }
           return;
         }
@@ -369,29 +417,52 @@ function Sensing() {
         setAspect(frame.width / frame.height || 4 / 3);
         if (checking) return;
         checking = true;
-        void localDetector.detect(frame).then(result => {
-          if (!running.current || token !== generation.current) return;
-          setInference(Math.round(result.inferenceMs));
-          setDevice(localDetector.device);
-          // Never re-stamp an old frame as current, or build a frame queue.
-          if (performance.now() - frame.timestamp > TRACK_TTL) {
-            if (++staleFrames >= 3) {
-              pause();
-              setError("This device is taking too long to check current frames. Close other apps and retry.");
-              audio.current.status("Sensing is too slow on this device. Close other apps and tap Start again.", prefRef.current, setAnnouncement);
+        void localDetector
+          .detect(frame)
+          .then((result) => {
+            if (!running.current || token !== generation.current) return;
+            setInference(Math.round(result.inferenceMs));
+            setDevice(localDetector.device);
+            // Never re-stamp an old frame as current, or build a frame queue.
+            if (performance.now() - frame.timestamp > TRACK_TTL) {
+              if (++staleFrames >= 3) {
+                pause();
+                setError(
+                  "This device is taking too long to check current frames. Close other apps and retry.",
+                );
+                audio.current.status(
+                  "Sensing is too slow on this device. Close other apps and tap Start again.",
+                  prefRef.current,
+                  setAnnouncement,
+                );
+              }
+              return;
             }
-            return;
-          }
-          staleFrames = 0;
-          latest.current = tracker.current.update(result.candidates, frame.timestamp);
-          setObjects(latest.current);
-          audio.current.update(latest.current, prefRef.current, setAnnouncement);
-        }).catch(e => {
-          if (token !== generation.current) return;
-          pause();
-          setError(`Detection stopped: ${errorText(e)}`);
-          audio.current.status("Sensing stopped. Tap Start to retry.", prefRef.current, setAnnouncement);
-        }).finally(() => { checking = false; });
+            staleFrames = 0;
+            latest.current = tracker.current.update(
+              result.candidates,
+              frame.timestamp,
+            );
+            setObjects(latest.current);
+            audio.current.update(
+              latest.current,
+              prefRef.current,
+              setAnnouncement,
+            );
+          })
+          .catch((e) => {
+            if (token !== generation.current) return;
+            pause();
+            setError(`Detection stopped: ${errorText(e)}`);
+            audio.current.status(
+              "Sensing stopped. Tap Start to retry.",
+              prefRef.current,
+              setAnnouncement,
+            );
+          })
+          .finally(() => {
+            checking = false;
+          });
       };
       frameId.current = requestAnimationFrame(loop);
     } catch (e) {
@@ -399,7 +470,11 @@ function Sensing() {
       if (token === generation.current) {
         pause();
         setError(errorText(e));
-        audio.current.status("Sensing could not start. Check camera permission and your connection, then tap Start again.", prefRef.current, setAnnouncement);
+        audio.current.status(
+          "Sensing could not start. Check camera permission and your connection, then tap Start again.",
+          prefRef.current,
+          setAnnouncement,
+        );
       }
     }
   }
@@ -439,8 +514,14 @@ function Sensing() {
   }
   async function describe() {
     if (!video.current || !running.current) return;
+    const token = generation.current;
     setDescribing(true);
     setScene("");
+    audio.current.status(
+      "Describing this view.",
+      prefRef.current,
+      setAnnouncement,
+    );
     try {
       const frame = provider.current?.frame(true);
       if (!frame) throw new Error("Camera frame unavailable.");
@@ -461,11 +542,23 @@ function Sensing() {
             position: o.direction === "centre" ? "center" : o.direction,
           })),
       });
+      if (token !== generation.current || !running.current) return;
       setScene(result.description);
+      audio.current.status(
+        result.description,
+        prefRef.current,
+        setAnnouncement,
+      );
     } catch (e) {
+      if (token !== generation.current || !running.current) return;
       setScene(errorText(e));
+      audio.current.status(
+        `Scene description unavailable. ${errorText(e)}`,
+        prefRef.current,
+        setAnnouncement,
+      );
     } finally {
-      setDescribing(false);
+      if (token === generation.current) setDescribing(false);
     }
   }
   const isActive = state === "live" || state === "demo" || state === "loading";
@@ -589,8 +682,12 @@ function Sensing() {
                       <button onClick={() => demoCue("backpack", "right")}>
                         Backpack · right
                       </button>
-                      <button onClick={() => demoCue("gate", "left")}>Gate · left</button>
-                      <button onClick={() => demoCue("door", "centre")}>Door · centre</button>
+                      <button onClick={() => demoCue("gate", "left")}>
+                        Gate · left
+                      </button>
+                      <button onClick={() => demoCue("door", "centre")}>
+                        Door · centre
+                      </button>
                     </div>
                   )}
                 </div>
@@ -614,7 +711,11 @@ function Sensing() {
                 onClick={() => {
                   if (isActive) {
                     pause();
-                    audio.current.status("Sensing paused.", prefRef.current, setAnnouncement);
+                    audio.current.status(
+                      "Sensing paused.",
+                      prefRef.current,
+                      setAnnouncement,
+                    );
                   } else void start();
                 }}
               >
@@ -673,9 +774,15 @@ function Sensing() {
           <div className="privacy-note">
             <ShieldCheck size={16} />
             <p>
-              {gemini ? <>Live sensing stays on your device. Only{" "}
-              <strong>Describe scene</strong> sends a single photo for an AI
-              description.</> : "Live sensing stays on your device. Camera images are not uploaded."}
+              {gemini ? (
+                <>
+                  Live sensing stays on your device. Only{" "}
+                  <strong>Describe scene</strong> sends a single photo for an AI
+                  description.
+                </>
+              ) : (
+                "Live sensing stays on your device. Camera images are not uploaded."
+              )}
             </p>
           </div>
         </div>
@@ -708,7 +815,11 @@ function Sensing() {
                       )}
                     </span>
                     <div>
-                      <strong>{o.label === "gate" || o.label === "door" ? `Possible ${o.label}` : o.label}</strong>
+                      <strong>
+                        {o.label === "gate" || o.label === "door"
+                          ? `Possible ${o.label}`
+                          : o.label}
+                      </strong>
                       <small>
                         {o.distanceMetres === null
                           ? "Distance unavailable"
@@ -747,7 +858,7 @@ function Sensing() {
               <span className="amber-dot" />
               <div>
                 <strong>Distance unavailable</strong>
-                <p>Camera mode · no aligned depth source</p>
+                <p>Object names and directions work without depth.</p>
               </div>
               <Link to="/probe" aria-label="Check distance capability">
                 <Info size={17} />
@@ -797,6 +908,58 @@ function Sensing() {
             <p className="setting-hint">
               Only new or meaningfully changed observations are announced.
             </p>
+            <label className="frequency-label" htmlFor="voice">
+              Guidance voice
+            </label>
+            <select
+              id="voice"
+              value={
+                voices.some((v) => v.voiceURI === prefs.voiceURI)
+                  ? prefs.voiceURI
+                  : ""
+              }
+              onChange={(e) => setPrefs({ ...prefs, voiceURI: e.target.value })}
+            >
+              <option value="">Automatic · recommended device voice</option>
+              {voices.map((v) => (
+                <option key={v.voiceURI} value={v.voiceURI}>
+                  {v.name} · {v.lang}
+                </option>
+              ))}
+            </select>
+            <p className="setting-hint">
+              {selectedVoice
+                ? `Using ${selectedVoice.name}.`
+                : "Uses your device's speech voice."}{" "}
+              Voice quality depends on the voices installed on your phone.
+            </p>
+            <label className="frequency-label" htmlFor="speech-speed">
+              Speaking speed
+            </label>
+            <select
+              id="speech-speed"
+              value={prefs.speechRate ?? 0.9}
+              onChange={(e) =>
+                setPrefs({ ...prefs, speechRate: Number(e.target.value) })
+              }
+            >
+              <option value={0.8}>Slow</option>
+              <option value={0.9}>Gentle · default</option>
+              <option value={1}>Normal</option>
+              <option value={1.1}>Slightly faster</option>
+            </select>
+            <button
+              className="button secondary voice-preview"
+              onClick={() =>
+                audio.current.status(
+                  "Take your time. Possible door, centre.",
+                  prefs,
+                  setAnnouncement,
+                )
+              }
+            >
+              <Volume2 size={17} /> Preview guidance voice
+            </button>
             <details>
               <summary>
                 <Settings2 size={14} /> Audio mode
@@ -819,42 +982,44 @@ function Sensing() {
               </select>
             </details>
           </section>
-          {gemini && <section className="scene-panel">
-            <div className="scene-icon">
-              <Sparkles size={20} />
-            </div>
-            <div>
-              <h2>A little more context.</h2>
-              <p>
+          {gemini && (
+            <section className="scene-panel">
+              <div className="scene-icon">
+                <Sparkles size={20} />
+              </div>
+              <div>
+                <h2>A little more context.</h2>
+                <p>
+                  {gemini
+                    ? "Get a brief AI description of one camera snapshot."
+                    : "Optional AI scene descriptions need a backend Gemini key."}
+                </p>
+              </div>
+              <button
+                className="button scene-button full"
+                disabled={!gemini || state !== "live" || describing}
+                onClick={() => void describe()}
+              >
+                {describing ? (
+                  <LoaderCircle size={17} className="spin" />
+                ) : (
+                  <Sparkles size={17} />
+                )}{" "}
+                {describing ? "Describing…" : "Describe scene"}
+                <ArrowUpRight size={16} />
+              </button>
+              {scene && (
+                <p className="scene-result" role="status">
+                  {scene}
+                </p>
+              )}
+              <small>
                 {gemini
-                  ? "Get a brief AI description of one camera snapshot."
-                  : "Optional AI scene descriptions need a backend Gemini key."}
-              </p>
-            </div>
-            <button
-              className="button scene-button full"
-              disabled={!gemini || state !== "live" || describing}
-              onClick={() => void describe()}
-            >
-              {describing ? (
-                <LoaderCircle size={17} className="spin" />
-              ) : (
-                <Sparkles size={17} />
-              )}{" "}
-              {describing ? "Describing…" : "Describe scene"}
-              <ArrowUpRight size={16} />
-            </button>
-            {scene && (
-              <p className="scene-result" role="status">
-                {scene}
-              </p>
-            )}
-            <small>
-              {gemini
-                ? "One photo sent only when you tap."
-                : "Local sensing works without this feature."}
-            </small>
-          </section>}
+                  ? "One photo sent only when you tap."
+                  : "Local sensing works without this feature."}
+              </small>
+            </section>
+          )}
         </aside>
       </div>
       <section className="bottom-note">
@@ -873,7 +1038,9 @@ function Sensing() {
         <button className="text-button" onClick={() => void demo()}>
           <Headphones size={15} /> Try the audio demo
         </button>
-        <Link className="text-button" to="/examples">Try detector example photos</Link>
+        <Link className="text-button" to="/examples">
+          Try detector example photos
+        </Link>
         <button
           className="text-button"
           onClick={() => setDiagnostics(!diagnostics)}
@@ -927,27 +1094,51 @@ function Probe() {
   const xr = useRef(new XRProbe());
   const audio = useRef(new AudioGuide());
   const root = useRef<HTMLDivElement>(null);
+  const testGeneration = useRef(0);
+  const checkingDepth =
+    report.phase === "requesting" || report.phase === "running";
+  function stopTests() {
+    testGeneration.current++;
+    camera.current.stop();
+    xr.current.stop();
+    setBusy(false);
+    setReport((r) => ({
+      ...r,
+      phase:
+        r.phase === "requesting" || r.phase === "running"
+          ? "cancelled"
+          : r.phase,
+      xr:
+        r.phase === "requesting" || r.phase === "running"
+          ? "Depth check stopped"
+          : r.xr,
+      centreDepthMetres: null,
+    }));
+  }
   useEffect(() => {
     const hidden = () => {
       if (document.hidden) {
-        camera.current.stop();
-        xr.current.stop();
+        stopTests();
         audio.current.cancel();
       }
     };
     document.addEventListener("visibilitychange", hidden);
     return () => {
       document.removeEventListener("visibilitychange", hidden);
+      testGeneration.current++;
       camera.current.stop();
       xr.current.stop();
       audio.current.dispose();
     };
   }, []);
   async function cameraTest() {
+    stopTests();
+    const token = testGeneration.current;
     setError("");
     setBusy(true);
     try {
       await camera.current.start(video.current!);
+      if (token !== testGeneration.current) return;
       const track = (
         video.current!.srcObject as MediaStream
       ).getVideoTracks()[0];
@@ -958,23 +1149,30 @@ function Probe() {
         checkedAt: new Date().toISOString(),
       }));
     } catch (e) {
+      if (token !== testGeneration.current) return;
       setError(errorText(e));
       setReport((r) => ({ ...r, camera: `Failed: ${errorText(e)}` }));
     } finally {
-      setBusy(false);
+      if (token === testGeneration.current) setBusy(false);
     }
   }
   async function xrTest() {
-    camera.current.stop();
+    stopTests();
+    const token = testGeneration.current;
     setBusy(true);
     setError("");
     try {
       await xr.current.start(report, setReport, root.current!);
     } catch (e) {
-      setError(errorText(e));
-      setReport((r) => ({ ...r, xr: `Unavailable: ${errorText(e)}` }));
+      if (token !== testGeneration.current) return;
+      setError(depthFailure(e));
+      audio.current.status(
+        "Depth is unavailable. Camera and voice guidance can still work.",
+        readPreferences(),
+        () => {},
+      );
     } finally {
-      setBusy(false);
+      if (token === testGeneration.current) setBusy(false);
     }
   }
   return (
@@ -985,29 +1183,29 @@ function Probe() {
       <p className="eyebrow">ON YOUR ACTUAL PHONE</p>
       <h1>Meet your device.</h1>
       <p className="intro">
-        A practical check of camera, depth, and audio. Feature support alone
-        doesn’t mean usable measurements are arriving.
+        Check your camera and listening cues here. Depth is an optional,
+        experimental check; normal sensing does not require it and currently
+        announces object names and directions without distances.
       </p>
       <div className="probe-actions">
         <button
           className="button primary"
-          disabled={busy}
+          disabled={busy || checkingDepth}
           onClick={() => void cameraTest()}
         >
           <Camera size={18} /> Test rear camera
         </button>
         <button
           className="button secondary"
-          disabled={busy}
+          disabled={busy || checkingDepth}
           onClick={() => void xrTest()}
         >
-          <ScanLine size={18} /> Test XR + depth
+          <ScanLine size={18} /> Check depth (optional)
         </button>
         <button
           className="button secondary"
           onClick={() => {
-            camera.current.stop();
-            xr.current.stop();
+            stopTests();
             setCalibrate(true);
           }}
         >
@@ -1016,8 +1214,12 @@ function Probe() {
         <button
           className="button pause-button"
           onClick={() => {
-            camera.current.stop();
-            xr.current.stop();
+            stopTests();
+            audio.current.status(
+              "Checks stopped.",
+              readPreferences(),
+              () => {},
+            );
           }}
         >
           Stop tests
@@ -1046,6 +1248,9 @@ function Probe() {
             "Immersive AR": report.xr,
             "Raw camera pixels": report.pixels,
             "Depth readings": report.depth,
+            "Depth access mode": report.depthUsage,
+            "Depth buffer frames": report.depthBufferFrames,
+            "AR tracking frames": report.poseFrames,
             "Frames with both": report.simultaneousFrames,
             "Valid depth frames": report.validDepthFrames,
             "Centre optical-axis depth":
@@ -1061,7 +1266,9 @@ function Probe() {
             </div>
           ))}
         </dl>
-        <p className="note">{report.note}</p>
+        <p className="note" role="status">
+          {report.note}
+        </p>
         <button
           className="button secondary"
           onClick={() => {
@@ -1084,29 +1291,32 @@ function Probe() {
         </details>
       </section>
       <section className="panel test-steps">
-        <h2>A two-minute phone check</h2>
+        <h2>Checking depth on Android</h2>
         <ol>
           <li>
-            Open this page in Chrome on your Nord CE5. Pair the open-ear
-            earbuds.
+            Open this HTTPS page directly in current Chrome. On Android, check
+            that Google Play Services for AR is installed and updated.
           </li>
           <li>Test the rear camera and confirm its preview faces forward.</li>
           <li>
-            Run XR + depth. Allow permissions and slowly move the phone around a
-            well-lit, textured indoor scene for 20 seconds. The test ends
+            Tap Check depth. Allow permissions and slowly move the phone around
+            a well-lit, textured indoor scene for 20 seconds. The test ends
             automatically after 25 seconds.
           </li>
           <li>
-            Copy results. Both readable pixels and actual depth must arrive in
-            the same session.
+            Copy results. Depth is now tested even when the browser cannot
+            supply raw camera images. Both are needed for future live object
+            distances.
           </li>
           <li>
             Play each stereo cue and check left / centre / right by listening.
           </li>
         </ol>
         <p>
-          Depth integration remains unavailable in live sensing until alignment
-          and measured-distance tests pass on the phone.
+          Google lists the Nord CE5 as supporting ARCore Depth, but browser
+          access is a separate requirement. Live object distance remains
+          unavailable; no depth setup is needed to use camera and voice
+          guidance.
         </p>
       </section>
       {calibrate && (
@@ -1166,14 +1376,15 @@ function Guide() {
           <ShieldCheck /> Honest about its limits
         </h2>
         <p>
-          This prototype recognises people, chairs, backpacks, gates, and doors. It can miss
-          or misidentify objects. No detections never means a clear path.
+          This prototype recognises people, chairs, backpacks, gates, and doors.
+          It can miss or misidentify objects. No detections never means a clear
+          path.
         </p>
         <p>
           Tap Start sensing once. Gates and doors are included automatically,
           with short cues such as “Possible door, centre.” A visible opening
-          does not confirm a usable exit. First use loads a model of about
-          38 MB plus browser runtime files.
+          does not confirm a usable exit. First use loads a model of about 38 MB
+          plus browser runtime files.
         </p>
         <p>
           Directions are camera-relative. There is no head tracking, awareness
@@ -1182,8 +1393,14 @@ function Guide() {
         </p>
         <p>
           Metric distance is unavailable in standard camera mode. The device
-          check can test experimental WebXR depth, but phone alignment still
-          requires verification.
+          check tests AR depth independently of optional raw camera access. It
+          does not enable distances in live sensing. Browser access, image
+          alignment and measured accuracy still require phone verification.
+        </p>
+        <p>
+          Guidance uses a gentle speaking speed and softer directional tones.
+          Choose an installed English voice or preview it in listening
+          preferences. The final sound depends on your phone's speech engine.
         </p>
         <p>
           Continuous detection is local. Describe scene, when configured, sends
@@ -1191,9 +1408,19 @@ function Guide() {
           EchoGuide.
         </p>
       </section>
-      <p className="note">Model: YOLOE-26s by Ultralytics, AGPL-3.0.
-        {" "}<a href="https://github.com/SamsDevForge/EchoGuide" target="_blank" rel="noreferrer">Full source and export instructions</a>
-        {" "}· <a href={import.meta.env.BASE_URL + "live-models/LICENSE"}>Model licence</a>
+      <p className="note">
+        Model: YOLOE-26s by Ultralytics, AGPL-3.0.{" "}
+        <a
+          href="https://github.com/SamsDevForge/EchoGuide"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Full source and export instructions
+        </a>{" "}
+        ·{" "}
+        <a href={import.meta.env.BASE_URL + "live-models/LICENSE"}>
+          Model licence
+        </a>
       </p>
       <Link className="button primary" to="/">
         Ready to try <ArrowUpRight size={18} />

@@ -39,9 +39,17 @@ Pause during loading terminates the worker and rejects the pending request; late
 
 GitHub Actions also passed fresh dependency installation, model preparation, checks and deployment. The public HTTPS app and its model/WASM assets returned HTTP 200. The mobile layout was inspected at 390 × 844 without horizontal overflow; this is viewport emulation, not phone verification.
 
+## Voice, depth and local scene revision (2 October 2026)
+
+**47 client tests and 12 server tests passed**, with TypeScript and production builds passing. New checks cover gentle rates/status voice consistency, preferred/late local voices and audible fallback; depth readings without a raw-camera binding; camera-readback failure not blocking depth; GPU availability without invented metres; tracking versus missing depth; session/initialization errors; automatic completion; and stopped/restarted checks ignoring old callbacks. Local-server tests verify frontend/SPA/asset serving, WASM-compatible CSP, and that missing APIs, assets and private files do not receive the app page.
+
+Desktop browser checks confirmed voice preview text, the speed control, and a recoverable unsupported-depth result. A real Gemini request through the local API returned **HTTP 200** with a description of the bundled public gate image. Its key is stored only in ignored local configuration. The local UI shows Describe scene when configured and shares its origin with the private API. This verifies API integration and interface behavior, not target-phone camera capture, perceived voice quality or AR depth success.
+
+The local built frontend returned “Example photo. Possible gate, left.” through actual single-threaded CPU/WASM inference under the server's CSP. This catches a security-header regression that could otherwise prevent the local model from compiling. The same model and weights remain in use.
+
 ## Physical checklist
 
-Use a stationary, supervised indoor setup on the target OnePlus Nord CE5 with paired open-ear earbuds. Run each relevant case on the actual phone, record the outcome, and retain copied device diagnostics. All physical results below are **pending**, not passed.
+Use a stationary, supervised indoor setup on the target OnePlus Nord CE5 with paired open-ear earbuds. Run each relevant case on the actual phone, record the outcome, and retain copied device diagnostics. The user reported depth failures on the Nord CE5 and other unspecified tested phones on **2 October 2026**. Browser/Android versions and copied error reports were not supplied. Other physical results below remain pending; the revised depth check has not passed on a phone.
 
 | Check | Procedure and evidence | Current result |
 | --- | --- | --- |
@@ -59,7 +67,7 @@ Use a stationary, supervised indoor setup on the target OnePlus Nord CE5 with pa
 | Pause/background/recovery | Pause, switch apps, lock the phone, then return. Confirm camera/audio stop and a deliberate Start resumes cleanly. Repeat Start/Pause several times. | Pending |
 | End-to-end latency | Record an object entering the frame and the resulting audio on a second device/video. Measure frame-entry-to-tone onset and frame-entry-to-spoken-label onset across at least 20 trials; report median and worst observed delay, selected pace, and device conditions. Diagnostics inference time is only model execution time. | Pending |
 | Sustained operation | Run a supervised stationary session for 10 minutes. Record heat, battery change, freezes, speech overlap, and recovery behavior. | Pending |
-| Experimental XR/depth | Run Device check's XR + depth test for its full duration. Copy JSON; inspect readable pixels, valid depth frames, and simultaneous frames. API availability alone is insufficient. | Pending |
+| Experimental XR/depth | Run the revised optional Check depth for its full duration. Copy JSON; inspect session errors, AR tracking frames, CPU/GPU mode, depth buffers, valid metric samples, and simultaneous camera/depth frames. Depth can be tested without raw camera access. | User reported failure on Nord CE5 and other tested phones; revised check pending |
 | Depth alignment/accuracy | If XR yields data, compare known measured targets and camera/depth coordinates under near/far, edge, occlusion, and invalid-depth cases. Live distance stays unavailable until a valid aligned provider is integrated and validated. | Pending |
 | Missing Gemini configuration | With no key, confirm the optional scene control stays hidden and local sensing works. | Pending |
 | Optional Gemini | If configured, tap Describe scene and check a visible-content-only short response; test timeout/service errors and ensure no distances or navigability claims. A single JPEG is sent to the backend and Gemini. | Pending |

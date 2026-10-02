@@ -28,7 +28,7 @@ npm test
 npm run build
 ```
 
-`npm run start` starts the built optional API; for a built frontend preview use `npm exec -w client vite preview -- --host 0.0.0.0`. For only the frontend in development use `npm run dev -w client`.
+After building, **`npm start` serves the frontend and API together at http://localhost:3001**. The default server listens only on this device. No hosting account is needed. For only the frontend in development use `npm run dev -w client`.
 
 ## Use on the phone
 
@@ -37,6 +37,8 @@ Open the HTTPS app link in Chrome on the OnePlus Nord CE5. Pair the boAt earbuds
 An ordinary `http://<computer LAN IP>:5173` link does **not** give Android Chrome a secure camera context. Use the public HTTPS deployment. An alternative for developers is Android USB debugging with `adb reverse tcp:5173 tcp:5173`, then `http://localhost:5173` on the attached phone. Android tooling is not bundled or required for the public link.
 
 The audio demo is explicitly marked as sample data and never mixed with live results. Disable Android’s mono-audio setting for stereo cues. The app cannot detect which audio output device Android selected; confirm by listening.
+
+Guidance now defaults to a gentle speaking speed (0.9) and softer directional tones. It prefers an installed English voice, prioritizing voices advertised as natural/enhanced when available. **Guidance voice**, **Speaking speed**, and **Preview guidance voice** are in listening preferences and saved on this device. Voices may load after the page opens; new voices are picked up automatically. If no suitable voice is exposed, the browser default preserves audible guidance. Voice quality and that fallback service depend on the phone's speech engine; no separate TTS account or model is required.
 
 Gates and doors use the same **Start sensing / Pause sensing** flow as other objects. Openings receive announcement priority, with unchanged observations suppressed. Startup, pause, interruption, and retry guidance are spoken. Frames are processed locally in one worker without an inference queue; expired results are discarded rather than announced as current. Backgrounding or leaving sensing stops the camera, worker, tones and speech. Recognition may miss openings or confuse fences/windows with gates/doors; an empty list does not mean “no exit.” Exit signs, text, arrows and usable exit routes are not classified.
 
@@ -47,13 +49,15 @@ The optional **Try detector example photos** link uses the exact same model and 
 - One local YOLOE-26s model for all five live classes, a rear-camera preview, normalised boxes, lightweight tracking, and camera-relative directions.
 - Automatic possible-gate/door announcements, optional same-model example photos, cancellation and spoken loading/error states.
 - Start/Pause, stopped-camera handling, background pause, stereo calibration, repeat, adjustable volume/pace, and optional HRTF tones.
-- An XR capability probe requesting raw camera access and CPU depth in the **same** session, reading actual camera pixels and depth, with copyable diagnostics.
+- An optional AR depth check requiring depth while requesting raw camera access separately as an optional feature in the **same** session. It can report actual CPU depth even without raw camera access, or GPU depth availability without inventing metric readings, with copyable diagnostics.
 - Optional Express Gemini scene descriptions and optional PostgreSQL/JWT/bcrypt account APIs. The primary UI uses local preferences and guest access.
 - GitHub Actions checks and HTTPS frontend deployment; optional Netlify, Vercel, and Render configuration.
 
 **Live metric distance is unavailable.** Standard camera frames are never combined with unrelated XR depth. The probe’s centre readings are diagnostic optical-axis depth, not distances to detected objects. A live aligned depth provider is not enabled. Phone tests must first establish usable same-session pixels/depth, orientation, calibration, surface association, and measured error. There is no simulated distance, monocular metre estimate, native wrapper, head tracking, or detection outside the camera’s view.
 
-Automated checks are distinct from physical tests. See [the verification record](docs/TESTING.md). Actual Nord CE5 recognition performance, earbud channel separation, end-to-end latency, and WebXR behaviour await physical testing. Optional Gemini and PostgreSQL need credentials for live integration tests.
+Automated checks are distinct from physical tests. See [the verification record](docs/TESTING.md). The user reported depth failures on the Nord CE5 and other tested phones on 2 October 2026. The old probe incorrectly made raw camera access mandatory for any depth result; the revised probe removes that gate, requests the session directly from the tap, and distinguishes session rejection, tracking failure, and tracking without depth. Success on these phones has **not** been established. Actual recognition performance, earbud channel separation and end-to-end latency remain unverified.
+
+[Google lists the Nord CE5 as supporting ARCore Depth](https://developers.google.com/ar/devices). That does not guarantee browser access. Use the HTTPS app directly in current Chrome with Google Play Services for AR updated. The check ends automatically after 25 seconds and clears the last current reading when stopped. No experimental browser flags are part of setup. Live object distance remains unavailable, and camera/audio sensing requires no depth setup.
 
 ## Architecture
 
@@ -63,7 +67,8 @@ Rear camera → VideoProvider → YOLOE-26s ONNX worker (local, one frame at a t
                            → announcement gate → stereo/HRTF tone + browser speech
                            → accessible React UI
 
-Device check → independent XR session → raw camera shader/readPixels + CPU depth
+Optional device check → independent XR session → CPU depth / GPU buffer availability
+                                               + optional raw camera shader/readPixels
 
 Optional examples → labelled photo → same YOLOE-26s worker → example-qualified speech
 
@@ -75,7 +80,7 @@ Explicit Describe scene → one JPEG → Express → Gemini → text description
 - `Tracker`: matching labels and box overlap associate observations; detections missing from the current frame are dropped immediately. Tracks expire after 2.5 seconds. There is no inference queue; processing uses the latest frame at a modest target rate.
 - The bounded 2.5-second capture-age limit accommodates model execution and short speech. A label is checked again before speech starts; missing objects, changed directions, Pause and backgrounding cancel it. This avoids cutting a normal CPU-result cue off immediately after its tone while still rejecting stale results.
 - Openings are prioritized before the eight-object display/audio limit, so many higher-scoring people cannot crowd them out. Overlap suppression only compares identical classes or confusable opening alternatives; a detected person standing in front of a returned door does not remove the door.
-- `audio.ts`: left = stereo pan -1, centre = 0, right = +1. A short tone precedes ordinary, unpanned speech because browser speech cannot be routed through Web Audio. A changed scene or Pause cancels pending cues and speech. Meaningfully unchanged objects are suppressed. Pace is a minimum interval, not a promise of an announcement every N seconds.
+- `audio.ts`, `voices.ts`: left = stereo pan -1, centre = 0, right = +1. A softer short tone precedes unpanned speech at a default rate of 0.9. Installed English voices are preferred and checked on every utterance, so asynchronous voice loading is supported. Status, observations and scene descriptions use the same voice settings. A changed scene or Pause cancels pending cues and speech. Meaningfully unchanged objects are suppressed. Pace is a minimum interval, not a promise of an announcement every N seconds.
 - `liveVision.ts`, `live.worker.ts`, `liveContract.ts`: fixed prompts baked into one pretrained model, WebGPU with single-threaded WASM fallback, same-origin weights/runtime, one in-flight request, and generation guards on cancellation. `gates.ts` validates scores/boxes and suppresses duplicates and higher-scoring overlapping fence/window/wall alternatives. Gate and door synonyms map to one spoken label each. Scores are not calibrated probabilities. Results retain capture timestamps; three consecutive expired results stop sensing with spoken retry guidance. `GateScan.tsx` is only a labelled example gallery; the former `/gates` route redirects to normal sensing.
 - `probe.ts`: requires `camera-access` and `depth-sensing` together. It samples the browser-owned texture into an application-owned framebuffer before readback. Pixel variation is evidence of readback, **not** proof of detector alignment. `getDepthInMeters` applies the API’s normalised-view-to-depth transform; raw buffers are never indexed as if they were camera pixels. Multiple centre samples reject missing and mixed depth. Optical-axis depth and Euclidean range are distinct; range utilities are tested but not used for live estimates.
 - `server/`: strict validation, bounded JPEG payloads, server-side API key, timeout, rate limiting, optional PostgreSQL preferences scoped to verified JWT subjects. Camera images are not stored or logged.
@@ -84,6 +89,12 @@ Explicit Describe scene → one JPEG → Express → Gemini → text description
 
 Copy `server/.env.example` to `server/.env` and put `GEMINI_API_KEY` there locally. Never commit keys or put them in a `VITE_` variable. Restart the server and reload the page; Describe scene becomes available. `GEMINI_MODEL` defaults to `gemini-2.5-flash`; use a model available to your project. A Gemini request can incur provider usage charges; no account or paid service is created by the app.
 
+For a private single-device run, use `npm run build`, `npm start`, then http://localhost:3001. The app and API share that address; **Describe scene** sends one snapshot and reads the returned description aloud in the selected guidance voice. Pausing/backgrounding cancels speech and ignores a late scene response. GitHub Pages hosts only the frontend, so the private key configured on a local computer does **not** enable Gemini on the public Pages link. An HTTPS backend is needed to enable it there.
+
+On 2 October 2026, a user-supplied key was saved only in the ignored local environment file. A real request through the local backend returned HTTP 200 with a description of the bundled public gate photo. The key is not included in the repository or browser build; recreating Gemini requires your own local key. Real PostgreSQL remains unconfigured and is not required.
+
+For an optional Android-only developer setup, [Termux](https://github.com/termux/termux-app#installation) provides an Android terminal and Node.js packages. Install it from its official instructions, install `git` and `nodejs-lts`, clone this repository, then use the same npm installation/model/build/start commands and a local `server/.env`. Open http://localhost:3001 in Chrome on **that same phone**. This avoids a hosting account or second-device LAN camera origin, but this installation has **not been verified on the Nord CE5**; Android may stop background processes. The public HTTPS camera/audio app is the simpler option when scene descriptions are not needed.
+
 The request deliberately sends one JPEG only when the button is tapped. Detections are supplied as fallible structured context. Prompt instructions prohibit invented distances and navigability claims, but generated content can still be wrong. Responses render as plain React text, not HTML.
 
 Environment variables:
@@ -91,6 +102,7 @@ Environment variables:
 | Variable | Where | Purpose |
 |---|---|---|
 | `PORT` | server | API port; default 3001 |
+| `HOST` | server | Default `127.0.0.1` for one-device use; hosted deployment can set `0.0.0.0` |
 | `CLIENT_ORIGIN` | server | Allowed frontend origin; default localhost:5173 |
 | `GEMINI_API_KEY` | server only | Optional scene description API key |
 | `GEMINI_MODEL` | server | Optional model name |

@@ -696,6 +696,10 @@ select {
 .listening details {
   margin-top: 12px;
 }
+.voice-preview {
+  margin-top: 12px;
+  width: 100%;
+}
 summary {
   cursor: pointer;
   font-size: 10px;
