@@ -51,6 +51,13 @@ describe("live opening validation", () => {
     ], 30);
     expect(candidates.map(item => item.label)).toEqual(["gate", "door"]);
   });
+  it("retains a returned door even when a person overlaps it", () => {
+    const candidates = liveCandidates([
+      prediction("person", .95, .1, .1, .4, .8),
+      prediction("door", .6, .1, .1, .4, .8),
+    ], 30);
+    expect(candidates.map(item => item.label)).toEqual(["door", "person"]);
+  });
   it("uses brief live wording without an exit or distance claim", () => {
     const candidates = liveCandidates([prediction("door", .8, .7, .1, .95, .8)], 40);
     const observation = new Tracker().update(candidates, 40)[0];

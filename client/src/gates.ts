@@ -11,6 +11,7 @@ export interface GatePrediction {
 /** Validate image-normalized boxes before class filtering and tracking. */
 export function validatedPredictions(predictions: GatePrediction[]) {
   const accepted: { prediction: GatePrediction; box: Box }[] = [];
+  const openingAlternatives = new Set(["gate", "door", "fence", "window", "wall"]);
   for (const prediction of [...predictions].sort((a, b) => b.score - a.score)) {
     const { xmin, ymin, xmax, ymax } = prediction.box;
     if (!Number.isFinite(prediction.score) || prediction.score < GATE_THRESHOLD ||
@@ -18,7 +19,10 @@ export function validatedPredictions(predictions: GatePrediction[]) {
     if (xmax <= xmin || ymax <= ymin || xmin >= 1 || ymin >= 1 || xmax <= 0 || ymax <= 0) continue;
     const x = Math.max(0, xmin), y = Math.max(0, ymin);
     const box = { x, y, width: Math.min(1, xmax) - x, height: Math.min(1, ymax) - y };
-    if (box.width * box.height < 0.005 || accepted.some(a => iou(a.box, box) > 0.45)) continue;
+    if (box.width * box.height < 0.005 || accepted.some(a =>
+      (a.prediction.label === prediction.label ||
+        (openingAlternatives.has(a.prediction.label) && openingAlternatives.has(prediction.label))) &&
+      iou(a.box, box) > 0.45)) continue;
     // Negative classes participate in suppression, then are discarded by the live allowlist.
     accepted.push({ prediction, box });
   }

@@ -26,7 +26,7 @@ Started: 2026-09-29 11:56 IST. Workspace was empty.
 
 ## Next steps
 - Implemented camera sensing, audio, probe, optional backend and deployment files.
-- Passed root type checking, 40 automated tests (31 client + 9 server), production builds; runtime audit found zero known issues.
+- Passed root type checking, 42 automated tests (33 client + 9 server), production builds; runtime audit found zero known issues.
 - Verified all five live class IDs, model SHA-256, one in-flight frame, stop/retry and automatic gate/door speech. Capture timestamps are preserved; the bounded 2.5-second expiry accommodates short cues without silently accepting unlimited delay.
 - Browser demo, Pause, calibration, Escape and unsupported XR state checked.
 - Gate and door examples passed actual browser WebGPU inference; gate also passed the CPU fallback. The rejected nano model missed the gate. Current phone inference/audio tests remain pending; previous captured-image model evidence is in Git history.

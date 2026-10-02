@@ -11,6 +11,7 @@ export type { LiveResponse, LiveRequest } from "./liveContract";
 export function liveCandidates(predictions: GatePrediction[], timestamp: number): Omit<Observation, "trackId">[] {
   return validatedPredictions(predictions)
     .filter(p => LIVE_LABELS.includes(p.label))
+    .sort((a, b) => Number(b.label === "gate" || b.label === "door") - Number(a.label === "gate" || a.label === "door"))
     .slice(0, 8)
     .map(p => ({
       timestamp,

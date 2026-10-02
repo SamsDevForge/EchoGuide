@@ -22,6 +22,15 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('live detections', () => {
+  it('keeps openings in a crowded frame before applying the eight-object limit', () => {
+    const people = Array.from({length:10}, (_, index) => {
+      const x = .02 + (index % 5) * .19, y = .02 + Math.floor(index / 5) * .35;
+      return box('person', .9, x, y, x + .12, y + .25);
+    });
+    const result = liveCandidates([...people, box('gate', .3, .05, .05, .95, .95)], 1);
+    expect(result).toHaveLength(8);
+    expect(result[0].label).toBe('gate');
+  });
   it('maps all five supported classes to image directions without a distance claim', () => {
     expect(LIVE_LABELS).toEqual(['person', 'chair', 'backpack', 'gate', 'door']);
     expect(MODEL_LABELS).toEqual([...LIVE_LABELS, 'fence', 'window', 'wall', 'gate', 'gate', 'door']);
@@ -32,8 +41,8 @@ describe('live detections', () => {
       box('gate', .6, .05, .7, .25, .95),
       box('door', .55, .4, .7, .6, .95),
     ], 12_345);
-    expect(result.map(item => item.label)).toEqual(LIVE_LABELS);
-    expect(result.map(item => item.direction)).toEqual(['left', 'centre', 'right', 'left', 'centre']);
+    expect(result.map(item => item.label)).toEqual(['gate', 'door', 'person', 'chair', 'backpack']);
+    expect(result.map(item => item.direction)).toEqual(['left', 'centre', 'left', 'centre', 'right']);
     expect(result.every(item => item.timestamp === 12_345 && item.distanceMetres === null && item.depthSource === 'none' && item.depthState === 'unavailable')).toBe(true);
     expect(result.every(item => !('trackId' in item))).toBe(true);
   });
