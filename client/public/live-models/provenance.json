@@ -1,0 +1,51 @@
+{
+  "model": "YOLOE-26s detection-only, fixed prompts",
+  "source": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26s-seg.pt",
+  "sourceSha256": "48f24206bc8680d60cbbfa296b0140da849669b9515058b72f5a945142df0654",
+  "sha256": "94e37c8dd737f2eca8cb8248ae50dac8bdc9625a96c10f48b32010d3cce933c0",
+  "bytes": 38186011,
+  "labels": [
+    "person",
+    "chair",
+    "backpack",
+    "gate",
+    "door",
+    "fence",
+    "window",
+    "wall",
+    "gate",
+    "gate",
+    "door"
+  ],
+  "prompts": [
+    "person",
+    "chair",
+    "backpack",
+    "metal gate",
+    "building door",
+    "fence",
+    "window",
+    "wall",
+    "wooden gate",
+    "gate",
+    "door"
+  ],
+  "inputSize": 640,
+  "inputs": {
+    "images": [
+      1,
+      3,
+      640,
+      640
+    ]
+  },
+  "outputs": {
+    "output0": [
+      1,
+      300,
+      6
+    ]
+  },
+  "exporter": "ultralytics==8.4.171; torch==2.10.0; onnx==1.20.1; onnxslim==0.1.85",
+  "license": "AGPL-3.0"
+}

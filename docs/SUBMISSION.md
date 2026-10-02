@@ -1,8 +1,8 @@
 # EchoGuide demonstration
 
-EchoGuide is a guest-first browser prototype for awareness of selected visible objects. It detects people, chairs, and backpacks locally and plays a camera-relative directional tone followed by a spoken label. The intended demonstration is stationary and supervised indoors, using a phone with its rear camera facing forward and paired open-ear earbuds.
+EchoGuide is an account-free browser prototype for awareness of selected visible objects. One local detector recognizes people, chairs, backpacks, gates and building doors, then plays a camera-relative directional tone followed by a spoken label. The demonstration is stationary and supervised indoors, with the rear camera facing forward and paired open-ear earbuds.
 
-The separate **Gates & doors** page checks a captured camera image or photo for possible gates, building doors and exit signs. Directions belong to that image, and announcements explicitly say that exit use is unconfirmed.
+**Start sensing** automatically includes gates and doors. No separate capture or photo step is needed. Announcements say “Possible gate, left.” or “Possible door, centre.”; detecting an opening does not confirm an exit.
 
 ## Three-to-five-minute demo script
 
@@ -12,15 +12,15 @@ The separate **Gates & doors** page checks a captured camera image or photo for 
 4. Leave an object still to demonstrate reduced repetition. Change its direction or introduce another selected object to demonstrate a new announcement. Show the pace and volume controls.
 5. Remove the objects. Explain that no selected objects detected does not establish a clear path. Show **Distance unavailable**: standard camera mode does not provide aligned metric depth.
 6. Tap **Pause** and confirm that capture and sound stop. Optionally open **Device check** to inspect camera and experimental XR/depth capability.
-7. Open **Gates & doors**. Have its model prepared before the demo (the additional model is about 204 MB). Capture a visible gate or building door, then show the box and hear “Possible gate/door, left/centre/right, in this image. Exit unconfirmed.” Capture again after repositioning the phone. The labelled **Try gate example / Try door example** photos can demonstrate the local check without a camera; identify them as examples. Explain that the app has not checked a lock, an exit route, or an exit-sign arrow/text.
-8. Start another image check and tap **Cancel check** to show immediate cancellation. Include actual misses or false positives in the recording rather than claiming dependable exit navigation.
+7. Resume **Start sensing** and face a gate or building door. Hear its short automatic directional announcement without tapping another control. Explain that the app has not checked a lock or exit route. Include actual misses or false positives in the recording.
+8. Optionally use **Try detector example photos** to exercise the same detector without a camera. Identify these as examples. Show Pause during loading/inference and retry. The one model is about 38 MB, plus runtime files; load it before the demonstration.
 
 If camera permissions or model startup prevent live sensing, **Try the audio demo** provides explicitly labelled sample objects for cue demonstration. It is not evidence of live recognition. Optional **Describe scene** requires a backend Gemini key and sends one selected JPEG only after a tap; local detection needs no key or account.
 
 ## Submission contents and claims
 
 - React/TypeScript client with local object detection, tracking, speech, stereo cues, local listening preferences, and device diagnostics.
-- Local Grounding DINO Tiny worker for gate/door/exit-sign candidate checks on deliberately captured images; no cloud inference or account needed.
+- Local fixed-prompt YOLOE-26s ONNX worker for all five live classes, with GPU/CPU fallback; no cloud inference or account needed. Weights, provenance, licences and optional export source are in GitHub.
 - Express/TypeScript backend with health checks and optional Gemini scene descriptions. Optional PostgreSQL account endpoints exist but are outside the single-device demonstration.
 - Reproducible project setup and asset preparation instructions in the root README; automated checks and a physical validation checklist in `TESTING.md`.
 

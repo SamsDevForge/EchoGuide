@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioGuide } from "./audio";
+import { liveCandidates } from "./liveVision";
+import { Tracker, TRACK_TTL } from "./vision";
 import type { Observation, Preferences } from "./contracts";
 
 const prefs: Preferences = {
@@ -91,10 +93,74 @@ afterEach(() => {
 });
 
 describe("audio cancellation across scene changes", () => {
-  it("speaks the qualified snapshot wording for a gate check and allows Pause to cancel it", async () => {
+  it("keeps a normal CPU-result cue audible while newer frames are arriving", async () => {
+    const guide = new AudioGuide();
+    await guide.unlock();
+    const opening = item({ label: "gate", timestamp: performance.now() - 1120 });
+    guide.update([opening], prefs, vi.fn());
+    vi.advanceTimersByTime(260);
+    expect(spoken[0].text).toBe("Possible gate, left.");
+    const cancels = cancelSpeech.mock.calls.length;
+    vi.advanceTimersByTime(400);
+    guide.update([opening], prefs, vi.fn());
+    expect(cancelSpeech).toHaveBeenCalledTimes(cancels);
+    guide.update([item({ label: "gate" })], prefs, vi.fn());
+    expect(cancelSpeech).toHaveBeenCalledTimes(cancels);
+    guide.cancel();
+  });
+
+  it("cancels a label if its frame expires between the tone and speech", async () => {
+    const guide = new AudioGuide();
+    await guide.unlock();
+    guide.update([item({ label: "door", timestamp: performance.now() - TRACK_TTL + 200 })], prefs, vi.fn());
+    vi.advanceTimersByTime(260);
+    expect(spoken).toHaveLength(0);
+  });
+  it("automatically speaks a gate and then a door from the same live pipeline used for ordinary objects", async () => {
+    const guide = new AudioGuide();
+    const tracker = new Tracker();
+    await guide.unlock();
+    const observe = (label: string, x: number, score = .8) => liveCandidates([
+      { label, score, box: { xmin: x, ymin: .1, xmax: x + .2, ymax: .8 } },
+      { label: "person", score: .95, box: { xmin: .75, ymin: .1, xmax: .95, ymax: .8 } },
+    ], performance.now());
+    guide.update(tracker.update(observe("gate", .05), performance.now()), prefs, vi.fn());
+    vi.advanceTimersByTime(260);
+    expect(spoken[0].text).toBe("Possible gate, left.");
+    spoken[0].onend!();
+    vi.advanceTimersByTime(2000);
+    guide.update(tracker.update(observe("door", .4), performance.now()), prefs, vi.fn());
+    vi.advanceTimersByTime(260);
+    expect(spoken.map(utterance => utterance.text)).toEqual(["Possible gate, left.", "Possible door, centre."]);
+    guide.cancel();
+  });
+
+  it("never speaks an opening from an expired frame", async () => {
+    const guide = new AudioGuide();
+    await guide.unlock();
+    guide.update([item({label: "door", timestamp: performance.now() - TRACK_TTL - 100})], prefs, vi.fn());
+    vi.advanceTimersByTime(1000);
+    expect(spoken).toHaveLength(0);
+  });
+
+  it("speaks startup and pause status while cancelling pending object speech", async () => {
+    const guide = new AudioGuide();
+    const text = vi.fn();
+    await guide.unlock();
+    guide.status("Sensing started.", prefs, text);
+    expect(spoken[0].text).toBe("Sensing started.");
+    spoken[0].onend!();
+    guide.update([item({label: "gate"})], prefs, text);
+    guide.status("Sensing paused.", prefs, text);
+    vi.advanceTimersByTime(1000);
+    expect(spoken.map(utterance => utterance.text)).toEqual(["Sensing started.", "Sensing paused."]);
+    expect(spoken.every(utterance => utterance.volume === prefs.volume)).toBe(true);
+    guide.cancel();
+  });
+  it("speaks the qualified example wording and allows Pause to cancel it", async () => {
     const guide = new AudioGuide();
     const onText = vi.fn();
-    const phrase = "Possible gate, left, in this image. Exit unconfirmed.";
+    const phrase = "Example photo. Possible gate, left.";
     await guide.unlock();
     guide.say(item({ label: "gate" }), prefs, onText, phrase);
     vi.advanceTimersByTime(260);
@@ -151,7 +217,7 @@ describe("audio cancellation across scene changes", () => {
     guide.cancel();
     const observation = item();
     guide.update([observation], prefs, vi.fn());
-    vi.advanceTimersByTime(1600);
+    vi.advanceTimersByTime(TRACK_TTL + 100);
     const staleCancels = cancelSpeech.mock.calls.length;
     guide.update([observation], prefs, vi.fn());
     expect(cancelSpeech).toHaveBeenCalledTimes(staleCancels + 1);

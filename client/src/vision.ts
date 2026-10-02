@@ -1,6 +1,6 @@
 import type { Box, CameraProvider, Direction, Observation } from "./contracts";
-import { FilesetResolver, ObjectDetector } from "@mediapipe/tasks-vision";
-export const TRACK_TTL = 1500;
+// Bounded capture age includes inference and the spoken cue; slow frames still expire.
+export const TRACK_TTL = 2500;
 export const directionFor = (x: number): Direction =>
   x < 0.38 ? "left" : x > 0.62 ? "right" : "centre";
 export const depthMedian = (samples: number[]): number | null => {
@@ -132,65 +132,4 @@ export class VideoProvider implements CameraProvider {
     this.lastVideoTime = -1;
     this.capturedAt = 0;
   }
-}
-let detectorPromise: Promise<ObjectDetector> | null = null;
-export function getDetector() {
-  if (!detectorPromise)
-    detectorPromise = FilesetResolver.forVisionTasks(
-      `${import.meta.env.BASE_URL}vision`,
-    )
-      .then((files) =>
-        ObjectDetector.createFromOptions(files, {
-          baseOptions: {
-            modelAssetPath: `${import.meta.env.BASE_URL}models/efficientdet-lite0.tflite`,
-            delegate: "CPU",
-          },
-          runningMode: "VIDEO",
-          scoreThreshold: 0.5,
-          maxResults: 8,
-          categoryAllowlist: ["person", "chair", "backpack"],
-        }),
-      )
-      .catch((e) => {
-        detectorPromise = null;
-        throw e;
-      });
-  return detectorPromise;
-}
-export function detect(
-  detector: ObjectDetector,
-  frame: NonNullable<ReturnType<VideoProvider["frame"]>>,
-  tracker: Tracker,
-) {
-  const started = performance.now();
-  const result = detector.detectForVideo(frame.image, frame.timestamp);
-  const items = result.detections.flatMap((d) => {
-    const b = d.boundingBox;
-    const c = d.categories[0];
-    if (!b || !c) return [];
-    const box = {
-      x: b.originX / frame.width,
-      y: b.originY / frame.height,
-      width: b.width / frame.width,
-      height: b.height / frame.height,
-    };
-    const horizontalPosition = Math.min(1, Math.max(0, box.x + box.width / 2));
-    return [
-      {
-        timestamp: frame.timestamp,
-        label: c.categoryName,
-        score: c.score,
-        box,
-        horizontalPosition,
-        direction: directionFor(horizontalPosition),
-        distanceMetres: null,
-        depthSource: "none" as const,
-        depthState: "unavailable" as const,
-      },
-    ];
-  });
-  return {
-    observations: tracker.update(items, frame.timestamp),
-    inferenceMs: performance.now() - started,
-  };
 }

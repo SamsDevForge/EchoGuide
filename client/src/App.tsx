@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import {
   AudioLines,
   ArrowLeft,
@@ -32,13 +32,8 @@ import {
 import type { Direction, Observation, Preferences } from "./contracts";
 import { defaults } from "./contracts";
 import { AudioGuide } from "./audio";
-import {
-  detect,
-  getDetector,
-  Tracker,
-  TRACK_TTL,
-  VideoProvider,
-} from "./vision";
+import { Tracker, TRACK_TTL, VideoProvider } from "./vision";
+import { LiveVision, LIVE_LABELS } from "./liveVision";
 import { api } from "./api";
 import { newReport, XRProbe } from "./probe";
 import GateScan from "./GateScan";
@@ -88,8 +83,8 @@ function App() {
             <NavLink to="/probe">
               <Activity size={17} /> Device check
             </NavLink>
-            <NavLink to="/gates">
-              <DoorOpen size={17} /> Gates & doors
+            <NavLink to="/guide">
+              <Info size={17} /> Quick guide
             </NavLink>
           </nav>
           <span className="guest">
@@ -101,7 +96,8 @@ function App() {
         <Route path="/" element={<Sensing />} />
         <Route path="/probe" element={<Probe />} />
         <Route path="/guide" element={<Guide />} />
-        <Route path="/gates" element={<GateScan />} />
+        <Route path="/gates" element={<Navigate to="/" replace />} />
+        <Route path="/examples" element={<GateScan />} />
         <Route path="*" element={<Guide />} />
       </Routes>
       <footer>
@@ -220,6 +216,7 @@ function Calibration({
 function Sensing() {
   const video = useRef<HTMLVideoElement>(null);
   const provider = useRef<VideoProvider | null>(null);
+  const detector = useRef<LiveVision | null>(null);
   const tracker = useRef(new Tracker());
   const audio = useRef(new AudioGuide());
   const running = useRef(false);
@@ -243,6 +240,8 @@ function Sensing() {
   const [diagnostics, setDiagnostics] = useState(false);
   const [gemini, setGemini] = useState(false);
   const [aspect, setAspect] = useState(4 / 3);
+  const [loadingMessage, setLoadingMessage] = useState("Getting sensing ready…");
+  const [device, setDevice] = useState<string | null>(null);
   useEffect(() => {
     prefRef.current = prefs;
     try {
@@ -262,6 +261,8 @@ function Sensing() {
     cancelAnimationFrame(frameId.current);
     provider.current?.stop();
     provider.current = null;
+    detector.current?.stop();
+    detector.current = null;
     tracker.current.clear();
     audio.current.cancel();
     latest.current = [];
@@ -282,6 +283,7 @@ function Sensing() {
       running.current = false;
       cancelAnimationFrame(frameId.current);
       provider.current?.stop();
+      detector.current?.stop();
       audio.current.dispose();
     };
   }, []);
@@ -290,15 +292,31 @@ function Sensing() {
     setError("");
     setScene("");
     setState("loading");
+    setDevice(null);
+    setLoadingMessage("Getting sensing ready…");
     const token = generation.current;
     const camera = new VideoProvider();
     provider.current = camera;
     try {
       await audio.current.unlock();
-      const detector = await getDetector();
       if (token !== generation.current) return;
+      audio.current.status("Starting sensing. Allow camera access if asked.", prefRef.current, setAnnouncement);
       if (!video.current) throw new Error("Camera preview unavailable.");
-      await camera.start(video.current);
+      const localDetector = new LiveVision(message => {
+        if (token === generation.current) setLoadingMessage(message);
+      });
+      detector.current = localDetector;
+      let cameraReady = false;
+      const cameraStart = camera.start(video.current).then(() => { cameraReady = true; });
+      const modelStart = localDetector.load().then(() => {
+        if (token === generation.current && !cameraReady) {
+          setLoadingMessage("Please allow camera access in your browser.");
+          audio.current.status("Please allow camera access in your browser.", prefRef.current, setAnnouncement);
+        }
+      });
+      await Promise.all([cameraStart, modelStart]);
+      if (token !== generation.current) return;
+      setDevice(localDetector.device);
       if (token !== generation.current) {
         camera.stop();
         return;
@@ -312,6 +330,7 @@ function Sensing() {
           if (running.current) {
             pause("Camera interrupted. Tap Start to reconnect.");
             setError("Camera access ended.");
+            audio.current.status("Camera interrupted. Tap Start to reconnect.", prefRef.current, setAnnouncement);
           }
         },
         { once: true },
@@ -319,14 +338,19 @@ function Sensing() {
       setAspect(video.current.videoWidth / video.current.videoHeight || 4 / 3);
       running.current = true;
       setState("live");
-      setAnnouncement("Listening for people, chairs, and backpacks.");
+      audio.current.status("Sensing started.", prefRef.current, setAnnouncement);
       let last = 0;
       let lastFrameAt = performance.now();
+      let checking = false;
+      let staleFrames = 0;
       const loop = (time: number) => {
         if (!running.current || token !== generation.current) return;
         frameId.current = requestAnimationFrame(loop);
         if (time - last < 300) return;
         last = time;
+        latest.current = latest.current.filter(o => time - o.timestamp <= TRACK_TTL);
+        setObjects(latest.current);
+        audio.current.update(latest.current, prefRef.current, setAnnouncement);
         const frame = camera.frame();
         if (!frame) {
           if (time - lastFrameAt > TRACK_TTL) {
@@ -337,25 +361,37 @@ function Sensing() {
           if (time - lastFrameAt > 5000) {
             pause("Camera stopped providing frames. Tap Start to retry.");
             setError("Camera stream interrupted.");
+            audio.current.status("Camera interrupted. Tap Start to reconnect.", prefRef.current, setAnnouncement);
           }
           return;
         }
         lastFrameAt = time;
         setAspect(frame.width / frame.height || 4 / 3);
-        try {
-          const result = detect(detector, frame, tracker.current);
-          latest.current = result.observations;
-          setObjects(result.observations);
+        if (checking) return;
+        checking = true;
+        void localDetector.detect(frame).then(result => {
+          if (!running.current || token !== generation.current) return;
           setInference(Math.round(result.inferenceMs));
-          audio.current.update(
-            result.observations,
-            prefRef.current,
-            setAnnouncement,
-          );
-        } catch (e) {
+          setDevice(localDetector.device);
+          // Never re-stamp an old frame as current, or build a frame queue.
+          if (performance.now() - frame.timestamp > TRACK_TTL) {
+            if (++staleFrames >= 3) {
+              pause();
+              setError("This device is taking too long to check current frames. Close other apps and retry.");
+              audio.current.status("Sensing is too slow on this device. Close other apps and tap Start again.", prefRef.current, setAnnouncement);
+            }
+            return;
+          }
+          staleFrames = 0;
+          latest.current = tracker.current.update(result.candidates, frame.timestamp);
+          setObjects(latest.current);
+          audio.current.update(latest.current, prefRef.current, setAnnouncement);
+        }).catch(e => {
+          if (token !== generation.current) return;
           pause();
           setError(`Detection stopped: ${errorText(e)}`);
-        }
+          audio.current.status("Sensing stopped. Tap Start to retry.", prefRef.current, setAnnouncement);
+        }).finally(() => { checking = false; });
       };
       frameId.current = requestAnimationFrame(loop);
     } catch (e) {
@@ -363,6 +399,7 @@ function Sensing() {
       if (token === generation.current) {
         pause();
         setError(errorText(e));
+        audio.current.status("Sensing could not start. Check camera permission and your connection, then tap Start again.", prefRef.current, setAnnouncement);
       }
     }
   }
@@ -370,7 +407,9 @@ function Sensing() {
     pause();
     setError("");
     setScene("");
+    const token = generation.current;
     await audio.current.unlock();
+    if (token !== generation.current) return;
     setState("demo");
     setAnnouncement(
       "Audio demonstration. These are sample objects, not live detections.",
@@ -532,12 +571,12 @@ function Sensing() {
                   </h2>
                   <p>
                     {state === "loading"
-                      ? "Loading the local object detector. The first start may take a moment."
+                      ? loadingMessage
                       : state === "demo"
                         ? "Sample cues only. Your camera is off."
                         : state === "paused"
                           ? "Your camera and audio are paused."
-                          : "Start sensing to hear nearby people, chairs, and backpacks."}
+                          : "Start sensing to hear people, chairs, backpacks, gates, and doors."}
                   </p>
                   {state === "demo" && (
                     <div className="demo-cues">
@@ -550,6 +589,8 @@ function Sensing() {
                       <button onClick={() => demoCue("backpack", "right")}>
                         Backpack · right
                       </button>
+                      <button onClick={() => demoCue("gate", "left")}>Gate · left</button>
+                      <button onClick={() => demoCue("door", "centre")}>Door · centre</button>
                     </div>
                   )}
                 </div>
@@ -570,7 +611,12 @@ function Sensing() {
             <div className="camera-actions">
               <button
                 className={`button ${isActive ? "pause-button" : "primary"} start-button`}
-                onClick={() => (isActive ? pause() : void start())}
+                onClick={() => {
+                  if (isActive) {
+                    pause();
+                    audio.current.status("Sensing paused.", prefRef.current, setAnnouncement);
+                  } else void start();
+                }}
               >
                 {isActive ? (
                   <Pause size={20} />
@@ -627,9 +673,9 @@ function Sensing() {
           <div className="privacy-note">
             <ShieldCheck size={16} />
             <p>
-              Live sensing stays on your device. Only{" "}
+              {gemini ? <>Live sensing stays on your device. Only{" "}
               <strong>Describe scene</strong> sends a single photo for an AI
-              description.
+              description.</> : "Live sensing stays on your device. Camera images are not uploaded."}
             </p>
           </div>
         </div>
@@ -655,12 +701,14 @@ function Sensing() {
                         <UserRound />
                       ) : o.label === "chair" ? (
                         <Armchair />
+                      ) : o.label === "gate" || o.label === "door" ? (
+                        <DoorOpen />
                       ) : (
                         <Backpack />
                       )}
                     </span>
                     <div>
-                      <strong>{o.label}</strong>
+                      <strong>{o.label === "gate" || o.label === "door" ? `Possible ${o.label}` : o.label}</strong>
                       <small>
                         {o.distanceMetres === null
                           ? "Distance unavailable"
@@ -706,14 +754,6 @@ function Sensing() {
               </Link>
             </div>
           </section>
-          <Link to="/gates" className="gate-entry">
-            <DoorOpen size={23} />
-            <span>
-              <strong>Looking for a gate or door?</strong>
-              <small>Check an image and hear its direction.</small>
-            </span>
-            <ChevronRight size={18} />
-          </Link>
           <section className="panel listening">
             <div className="panel-heading">
               <h2>
@@ -779,7 +819,7 @@ function Sensing() {
               </select>
             </details>
           </section>
-          <section className="scene-panel">
+          {gemini && <section className="scene-panel">
             <div className="scene-icon">
               <Sparkles size={20} />
             </div>
@@ -814,7 +854,7 @@ function Sensing() {
                 ? "One photo sent only when you tap."
                 : "Local sensing works without this feature."}
             </small>
-          </section>
+          </section>}
         </aside>
       </div>
       <section className="bottom-note">
@@ -822,7 +862,8 @@ function Sensing() {
         <p>
           <strong>A companion for awareness.</strong> For stationary, supervised
           indoor use. Only selected visible objects are detected; this is not a
-          navigation or obstacle-avoidance system.
+          navigation or obstacle-avoidance system. A detected gate or door may
+          be locked or lead elsewhere; it is not a confirmed exit.
         </p>
         <Link to="/guide">
           Know the limits <ChevronRight size={16} />
@@ -832,6 +873,7 @@ function Sensing() {
         <button className="text-button" onClick={() => void demo()}>
           <Headphones size={15} /> Try the audio demo
         </button>
+        <Link className="text-button" to="/examples">Try detector example photos</Link>
         <button
           className="text-button"
           onClick={() => setDiagnostics(!diagnostics)}
@@ -846,8 +888,9 @@ function Sensing() {
               mode: state,
               provider: "getUserMedia",
               depth: "unavailable (no aligned XR depth)",
-              model: "EfficientDet-Lite0 int8",
-              classes: ["person", "chair", "backpack"],
+              model: "YOLOE-26s · fixed prompts",
+              device,
+              classes: LIVE_LABELS,
               inferenceMs: inference,
               inferenceNote:
                 "Inference duration only; not camera-to-audio latency",
@@ -1123,14 +1166,14 @@ function Guide() {
           <ShieldCheck /> Honest about its limits
         </h2>
         <p>
-          This prototype recognises people, chairs, and backpacks. It can miss
+          This prototype recognises people, chairs, backpacks, gates, and doors. It can miss
           or misidentify objects. No detections never means a clear path.
         </p>
         <p>
-          The Gates & doors page checks a captured image locally for gates,
-          doors, and possible exit signs. It announces candidate directions
-          without confirming that an opening is a usable exit. First use
-          downloads an additional model of about 204 MB plus runtime files.
+          Tap Start sensing once. Gates and doors are included automatically,
+          with short cues such as “Possible door, centre.” A visible opening
+          does not confirm a usable exit. First use loads a model of about
+          38 MB plus browser runtime files.
         </p>
         <p>
           Directions are camera-relative. There is no head tracking, awareness
@@ -1148,6 +1191,10 @@ function Guide() {
           EchoGuide.
         </p>
       </section>
+      <p className="note">Model: YOLOE-26s by Ultralytics, AGPL-3.0.
+        {" "}<a href="https://github.com/SamsDevForge/EchoGuide" target="_blank" rel="noreferrer">Full source and export instructions</a>
+        {" "}· <a href={import.meta.env.BASE_URL + "live-models/LICENSE"}>Model licence</a>
+      </p>
       <Link className="button primary" to="/">
         Ready to try <ArrowUpRight size={18} />
       </Link>

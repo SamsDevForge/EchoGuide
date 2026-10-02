@@ -1,0 +1,21 @@
+EchoGuide live detector
+
+YOLOE-26s by Ultralytics, AGPL-3.0.
+Source: https://github.com/ultralytics/ultralytics/tree/v8.4.171
+Pretrained checkpoint: https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26s-seg.pt
+This detection-only ONNX export bakes fixed text prompts into the weights.
+Metal/wooden/generic gate descriptions share the spoken label "gate";
+building/generic door descriptions share "door". Fence/window/wall are
+negative overlap alternatives, never announced as openings.
+
+Full model licence: live-models/LICENSE
+Checkpoint and ONNX SHA-256 hashes, exact prompts, class IDs, dimensions,
+and exporter versions: live-models/provenance.json
+Application and complete export source: https://github.com/SamsDevForge/EchoGuide
+Developer export: scripts/export-live-model.py and scripts/model-export-requirements.txt
+No model training. No Python required for cloning/running the committed ONNX.
+
+ONNX Runtime 1.30.0 by Microsoft, MIT.
+Source: https://github.com/microsoft/onnxruntime/tree/v1.30.0
+Full licence: onnxruntime-LICENSE
+Model, runtime, and example-photo licences are separate from the application source licence.

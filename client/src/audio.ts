@@ -1,7 +1,7 @@
 import type { Observation, Preferences, Direction } from "./contracts";
 import { TRACK_TTL } from "./vision";
 export function phraseFor(o: Observation) {
-  return `${o.label}, ${o.direction}${o.depthState === "valid" && o.distanceMetres !== null ? `, about ${(Math.round(o.distanceMetres * 2) / 2).toFixed(1)} metres` : ""}.`;
+  return `${o.label === "gate" || o.label === "door" ? "Possible " : ""}${o.label}, ${o.direction}${o.depthState === "valid" && o.distanceMetres !== null ? `, about ${(Math.round(o.distanceMetres * 2) / 2).toFixed(1)} metres` : ""}.`;
 }
 export function signature(o: Observation) {
   return `${o.trackId}:${o.direction}:${o.depthState}:${o.distanceMetres === null ? "none" : Math.round(o.distanceMetres * 2)}`;
@@ -15,7 +15,7 @@ export class AnnouncementGate {
     for (const key of this.spoken.keys())
       if (!ids.has(key)) this.spoken.delete(key);
     if (now - this.lastAt < interval) return null;
-    const item = fresh.find((o) => this.spoken.get(o.trackId) !== signature(o));
+    const item = [...fresh].sort((a, b) => Number(b.label === "gate" || b.label === "door") - Number(a.label === "gate" || a.label === "door")).find((o) => this.spoken.get(o.trackId) !== signature(o));
     if (item) {
       this.lastAt = now;
       this.spoken.set(item.trackId, signature(item));
@@ -42,6 +42,19 @@ export class AudioGuide {
   async unlock() {
     this.context ??= new AudioContext();
     await this.context.resume();
+  }
+  status(text: string, prefs: Preferences, onText: (text: string) => void) {
+    this.cancel(false);
+    onText(text);
+    if (!("speechSynthesis" in window)) return;
+    this.busy = true;
+    const generation = this.generation;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.volume = prefs.volume;
+    utterance.onend = utterance.onerror = () => {
+      if (generation === this.generation) this.busy = false;
+    };
+    window.speechSynthesis.speak(utterance);
   }
   dispose() {
     this.cancel();
@@ -99,6 +112,10 @@ export class AudioGuide {
     onText(phrase);
     this.timer = setTimeout(() => {
       if (generation !== this.generation) return;
+      if (!spokenText && performance.now() - item.timestamp > TRACK_TTL) {
+        this.cancel(false);
+        return;
+      }
       if (!("speechSynthesis" in window)) {
         this.busy = false;
         return;
