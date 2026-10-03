@@ -16,6 +16,15 @@ Device check: https://samsdevforge.github.io/EchoGuide/probe
 - Separate labelled audio demonstration for unsupported devices.
 - Private local Gemini scene descriptions with spoken results, one-address frontend/API serving, PostgreSQL/JWT/bcrypt account APIs, validation, limits, and timeouts.
 - Reproducible npm lockfile/setup, deployment workflow, architecture and attribution, demo script and recording checklist.
+- Accessible main controls, persistent Pause, skip link/page focus, modal focus isolation, saved large-text/high-contrast views and screen-reader guidance without competing app speech.
+- Current-view summaries, gate-and-door focus, on-request guidance, readable status, volume buttons, keyboard shortcuts and optional single-command microphone control with timeout/cancellation.
+
+## Accessibility revision verified on 3 October 2026
+
+- Type checking, production builds, and **73 tests (61 client + 12 server)** passed. New tests cover fresh summaries/opening focus, output modes, summary cancellation, strict voice-command matching, permission errors, timeout, construction failure and ignored late results.
+- Desktop browser accessibility tree shows labelled controls and hides decorative icons. Screen-reader mode exposes a polite guidance live region and suppresses automatic app speech/tones; actual TalkBack speech was not tested.
+- Native earbud dialog removes background content from the accessibility tree, wraps Tab/Shift+Tab, closes with Escape and restores launcher focus. Navigation moves focus to main content. Saved display and focus preferences survive reloads.
+- A 375 × 844 viewport with larger text and high contrast had no horizontal overflow. Sample door guidance and persistent Pause were checked in the running built app. Browser emulation is not physical-phone verification.
 
 ## Verified locally on 2 October 2026
 

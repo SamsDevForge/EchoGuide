@@ -80,6 +80,7 @@ export class AudioGuide {
   private busy = false;
   private activeTrack: string | null = null;
   private activeSignature: string | null = null;
+  private activeSnapshot: Observation[] | null = null;
   gate = new AnnouncementGate();
   async unlock() {
     this.context ??= new AudioContext();
@@ -88,7 +89,11 @@ export class AudioGuide {
   status(text: string, prefs: Preferences, onText: (text: string) => void) {
     this.cancel(false);
     onText(text);
-    if (!("speechSynthesis" in window)) return;
+    if (
+      prefs.speechOutput === "screen-reader" ||
+      !("speechSynthesis" in window)
+    )
+      return;
     this.busy = true;
     const generation = this.generation;
     const utterance = guidanceUtterance(text, prefs);
@@ -108,6 +113,7 @@ export class AudioGuide {
     if (context && context.state !== "closed") void context.close();
   }
   tone(direction: Direction, prefs: Preferences) {
+    if (prefs.speechOutput === "screen-reader") return;
     if (!this.context || this.context.state !== "running") return;
     this.oscillator?.stop();
     const ctx = this.context;
@@ -155,6 +161,10 @@ export class AudioGuide {
     this.tone(item.direction, prefs);
     const phrase = spokenText ?? phraseFor(item);
     onText(phrase);
+    if (prefs.speechOutput === "screen-reader") {
+      this.busy = false;
+      return;
+    }
     this.timer = setTimeout(() => {
       if (generation !== this.generation) return;
       if (!spokenText && performance.now() - item.timestamp > TRACK_TTL) {
@@ -176,11 +186,33 @@ export class AudioGuide {
       window.speechSynthesis.speak(utterance);
     }, 260);
   }
+  readView(
+    items: Observation[],
+    text: string,
+    prefs: Preferences,
+    onText: (text: string) => void,
+  ) {
+    this.status(text, prefs, onText);
+    this.activeSnapshot = items.length ? [...items] : null;
+  }
   update(
     items: Observation[],
     prefs: Preferences,
     onText: (text: string) => void,
   ) {
+    if (
+      this.activeSnapshot &&
+      this.activeSnapshot.some(
+        (previous) =>
+          performance.now() - previous.timestamp > TRACK_TTL ||
+          !items.some(
+            (current) =>
+              signature(current) === signature(previous) &&
+              performance.now() - current.timestamp <= TRACK_TTL,
+          ),
+      )
+    )
+      this.cancel(false);
     if (
       this.activeTrack &&
       !items.some(
@@ -191,6 +223,7 @@ export class AudioGuide {
       )
     )
       this.cancel(false);
+    if (prefs.announcementMode === "on-request") return;
     if (this.busy) return;
     const item = this.gate.choose(
       items,
@@ -210,6 +243,7 @@ export class AudioGuide {
     this.busy = false;
     this.activeTrack = null;
     this.activeSignature = null;
+    this.activeSnapshot = null;
     if (reset) this.gate.reset();
   }
 }

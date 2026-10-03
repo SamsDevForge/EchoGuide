@@ -26,7 +26,7 @@ Started: 2026-09-29 11:56 IST. Workspace was empty.
 
 ## Next steps
 - Implemented camera sensing, audio, probe, optional backend and deployment files.
-- Passed type checking, 59 automated tests (47 client + 12 server), and production builds. Dependencies unchanged; earlier runtime audit found zero known issues.
+- Passed type checking, 73 automated tests (61 client + 12 server), and production builds on 3 October 2026. Dependencies unchanged; earlier runtime audit found zero known issues.
 - Verified all five live class IDs, model SHA-256, one in-flight frame, stop/retry and automatic gate/door speech. Capture timestamps are preserved; the bounded 2.5-second expiry accommodates short cues without silently accepting unlimited delay.
 - Browser demo, Pause, calibration, Escape and unsupported XR state checked.
 - Gate and door examples passed actual browser WebGPU inference; gate also passed the CPU fallback. The rejected nano model missed the gate. Current phone inference/audio tests remain pending; previous captured-image model evidence is in Git history.
@@ -36,3 +36,4 @@ Started: 2026-09-29 11:56 IST. Workspace was empty.
 - User has phone test URL/procedure; depth failures are recorded, and the revised probe needs a real-phone rerun. See docs/COMPLETION.md.
 - Gentle voice, voice preview/selection and improved independent AR depth checks implemented. Tests cover installed/late/fallback voices, tracking/depth absence and stale session cancellation.
 - Built frontend and private API now share localhost:3001 via npm start, loopback by default. Describe scene speaks its real response and ignores late responses after Pause. Public Pages still has no scene backend.
+- Main controls now precede the collapsed preview; large labelled controls, screen-reader output without competing app speech, persistent Pause, native modal isolation and explicit focus restoration are implemented. Display choices persist across routes and reloads. Fresh view summaries, gate/door focus, on-request guidance, status reading and optional session-only voice commands are included. Desktop keyboard/AX and 375-pixel large-text/high-contrast layouts were checked; actual TalkBack and microphone/phone verification remain pending.

@@ -18,7 +18,6 @@ import {
   Play,
   RotateCcw,
   ScanLine,
-  Settings2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -28,43 +27,22 @@ import {
   Armchair,
   Activity,
   DoorOpen,
+  Mic,
 } from "lucide-react";
 import type { Direction, Observation, Preferences } from "./contracts";
-import { defaults } from "./contracts";
-import { AudioGuide } from "./audio";
+import { readPreferences } from "./preferences";
+import { AudioGuide, phraseFor } from "./audio";
 import { availableGuidanceVoices, selectGuidanceVoice } from "./voices";
 import { Tracker, TRACK_TTL, VideoProvider } from "./vision";
 import { LiveVision, LIVE_LABELS } from "./liveVision";
 import { api } from "./api";
 import { depthFailure, newReport, XRProbe } from "./probe";
 import GateScan from "./GateScan";
+import { DisplayTools, RouteFocus } from "./Accessibility";
+import { currentObservations, viewSummary } from "./guidance";
+import { CommandListener, recognitionFactory } from "./commands";
+import type { VoiceCommand } from "./commands";
 
-function readPreferences(): Preferences {
-  try {
-    const p = JSON.parse(localStorage.getItem("echoguide.preferences") ?? "{}");
-    return {
-      volume:
-        typeof p.volume === "number" && Number.isFinite(p.volume)
-          ? Math.max(0, Math.min(1, p.volume))
-          : defaults.volume,
-      announcementIntervalMs: [3000, 5000, 8000].includes(
-        p.announcementIntervalMs,
-      )
-        ? p.announcementIntervalMs
-        : defaults.announcementIntervalMs,
-      spatialMode: p.spatialMode === "hrtf" ? "hrtf" : "stereo",
-      voiceURI:
-        typeof p.voiceURI === "string" && p.voiceURI.length < 300
-          ? p.voiceURI
-          : "",
-      speechRate: [0.8, 0.9, 1, 1.1].includes(p.speechRate)
-        ? p.speechRate
-        : defaults.speechRate,
-    };
-  } catch {
-    return defaults;
-  }
-}
 function useGuidanceVoices() {
   const [voices, setVoices] = useState(availableGuidanceVoices);
   useEffect(() => {
@@ -82,7 +60,7 @@ function Brand() {
   return (
     <Link className="brand" to="/" aria-label="EchoGuide home">
       <span className="brand-mark">
-        <AudioLines size={23} />
+        <AudioLines aria-hidden="true" size={23} />
       </span>
       echo<span>guide</span>
       <span className="beta">PROTOTYPE</span>
@@ -92,25 +70,27 @@ function Brand() {
 function App() {
   return (
     <>
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      <RouteFocus />
       <header className="header">
         <div className="header-inner">
           <Brand />
           <nav aria-label="Main navigation">
             <NavLink to="/" end>
-              <ScanLine size={17} /> Sensing
+              <ScanLine aria-hidden="true" size={17} /> Sensing
             </NavLink>
             <NavLink to="/probe">
-              <Activity size={17} /> Device check
+              <Activity aria-hidden="true" size={17} /> Device check
             </NavLink>
             <NavLink to="/guide">
-              <Info size={17} /> Quick guide
+              <Info aria-hidden="true" size={17} /> Quick guide
             </NavLink>
           </nav>
-          <span className="guest">
-            <span /> Guest mode
-          </span>
         </div>
       </header>
+      <DisplayTools />
       <Routes>
         <Route path="/" element={<Sensing />} />
         <Route path="/probe" element={<Probe />} />
@@ -121,7 +101,8 @@ function App() {
       </Routes>
       <footer>
         <span>
-          <AudioLines size={16} /> A little more awareness. One sound at a time.
+          <AudioLines aria-hidden="true" size={16} /> A little more awareness.
+          One sound at a time.
         </span>
         <span>
           AI for Smart Mobility <i>·</i> Indoor prototype
@@ -139,9 +120,7 @@ function Calibration({
   prefs: Preferences;
   onClose: () => void;
 }) {
-  const dialog = useRef<HTMLElement>(null);
-  const close = useRef(onClose);
-  close.current = onClose;
+  const dialog = useRef<HTMLDialogElement>(null);
   const [active, setActive] = useState<Direction | null>(null);
   const [tested, setTested] = useState<Direction[]>([]);
   async function cue(direction: Direction) {
@@ -153,14 +132,29 @@ function Calibration({
   }
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const keys = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+    const modal = dialog.current;
+    modal?.showModal();
+    return () => {
+      modal?.close();
+      audio.cancel();
+      previous?.focus();
+    };
+  }, [audio]);
+  return (
+    <dialog
+      ref={dialog}
+      aria-labelledby="calibration-title"
+      aria-describedby="calibration-description"
+      className="modal"
+      onCancel={(e) => {
         e.preventDefault();
-        close.current();
-      }
-      if (e.key === "Tab") {
-        const buttons =
-          dialog.current?.querySelectorAll<HTMLButtonElement>("button");
+        onClose();
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Tab") return;
+        const buttons = dialog.current?.querySelectorAll<HTMLButtonElement>(
+          "button:not(:disabled)",
+        );
         if (!buttons?.length) return;
         const first = buttons[0],
           last = buttons[buttons.length - 1];
@@ -171,69 +165,52 @@ function Calibration({
           e.preventDefault();
           first.focus();
         }
-      }
-    };
-    document.addEventListener("keydown", keys);
-    return () => {
-      document.removeEventListener("keydown", keys);
-      audio.cancel();
-      previous?.focus();
-    };
-  }, [audio]);
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <section
-        ref={dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="calibration-title"
-        className="modal"
-        onClick={(e) => e.stopPropagation()}
+      }}
+    >
+      <button
+        autoFocus
+        className="icon-button close"
+        aria-label="Close calibration"
+        onClick={onClose}
       >
-        <button
-          autoFocus
-          className="icon-button close"
-          aria-label="Close calibration"
-          onClick={onClose}
-        >
-          <X />
-        </button>
-        <div className="feature-icon">
-          <Headphones />
-        </div>
-        <p className="eyebrow">MAKE YOURSELF COMFORTABLE</p>
-        <h2 id="calibration-title">Find your left and right.</h2>
-        <p>
-          Pair your earbuds, turn off mono audio in your phone’s accessibility
-          settings, and try each cue at a comfortable volume.
-        </p>
-        <div className="cue-grid">
-          {(["left", "centre", "right"] as Direction[]).map((d) => (
-            <button
-              className={active === d ? "cue selected" : "cue"}
-              key={d}
-              onClick={() => void cue(d)}
-            >
-              <Volume2 />
-              <strong>{d}</strong>
-              <small>{tested.includes(d) ? "Played" : "Tap to listen"}</small>
-            </button>
-          ))}
-        </div>
-        <p className="note">
-          You should hear left in your left ear, right in your right ear, and
-          centre in both. Spoken labels play normally after the directional
-          tone.
-        </p>
-        <button className="button primary full" onClick={onClose}>
-          Done <Check size={18} />
-        </button>
-      </section>
-    </div>
+        <X aria-hidden="true" />
+      </button>
+      <div className="feature-icon">
+        <Headphones aria-hidden="true" />
+      </div>
+      <p className="eyebrow">MAKE YOURSELF COMFORTABLE</p>
+      <h2 id="calibration-title">Find your left and right.</h2>
+      <p id="calibration-description">
+        Pair your earbuds, turn off mono audio in your phone’s accessibility
+        settings, and try each cue at a comfortable volume.
+      </p>
+      <div className="cue-grid">
+        {(["left", "centre", "right"] as Direction[]).map((d) => (
+          <button
+            className={active === d ? "cue selected" : "cue"}
+            key={d}
+            aria-pressed={active === d}
+            onClick={() => void cue(d)}
+          >
+            <Volume2 aria-hidden="true" />
+            <strong>{d}</strong>
+            <small>{tested.includes(d) ? "Played" : "Tap to listen"}</small>
+          </button>
+        ))}
+      </div>
+      <p className="note">
+        You should hear left in your left ear, right in your right ear, and
+        centre in both. Spoken labels play normally after the directional tone.
+      </p>
+      <button className="button primary full" onClick={onClose}>
+        Done <Check aria-hidden="true" size={18} />
+      </button>
+    </dialog>
   );
 }
 function Sensing() {
   const video = useRef<HTMLVideoElement>(null);
+  const startControl = useRef<HTMLButtonElement>(null);
   const provider = useRef<VideoProvider | null>(null);
   const detector = useRef<LiveVision | null>(null);
   const tracker = useRef(new Tracker());
@@ -252,19 +229,28 @@ function Sensing() {
   const selectedVoice = selectGuidanceVoice(voices, prefs.voiceURI);
   const prefRef = useRef(prefs);
   const [calibrate, setCalibrate] = useState(false);
-  const [announcement, setAnnouncement] = useState(
+  const [announcement, setAnnouncementText] = useState(
     "Your next observation will appear here.",
   );
+  const [announcementVersion, setAnnouncementVersion] = useState(0);
+  function setAnnouncement(text: string) {
+    setAnnouncementText(text);
+    setAnnouncementVersion((version) => version + 1);
+  }
   const [inference, setInference] = useState<number | null>(null);
   const [scene, setScene] = useState("");
   const [describing, setDescribing] = useState(false);
-  const [diagnostics, setDiagnostics] = useState(false);
   const [gemini, setGemini] = useState(false);
   const [aspect, setAspect] = useState(4 / 3);
   const [loadingMessage, setLoadingMessage] = useState(
     "Getting sensing ready…",
   );
   const [device, setDevice] = useState<string | null>(null);
+  const commandListener = useRef(new CommandListener());
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [listening, setListening] = useState(false);
+  const listeningRef = useRef(false);
+  const [commandMessage, setCommandMessage] = useState("");
   useEffect(() => {
     prefRef.current = prefs;
     try {
@@ -279,6 +265,9 @@ function Sensing() {
       .catch(() => setGemini(false));
   }, []);
   function pause(message = "Sensing paused. Tap Start when you’re ready.") {
+    commandListener.current.cancel();
+    setListening(false);
+    listeningRef.current = false;
     generation.current++;
     running.current = false;
     cancelAnimationFrame(frameId.current);
@@ -309,6 +298,7 @@ function Sensing() {
       provider.current?.stop();
       detector.current?.stop();
       audio.current.dispose();
+      commandListener.current.cancel();
     };
   }, []);
   async function start() {
@@ -394,7 +384,12 @@ function Sensing() {
           (o) => time - o.timestamp <= TRACK_TTL,
         );
         setObjects(latest.current);
-        audio.current.update(latest.current, prefRef.current, setAnnouncement);
+        if (!listeningRef.current)
+          audio.current.update(
+            currentObservations(latest.current, prefRef.current, time),
+            prefRef.current,
+            setAnnouncement,
+          );
         const frame = camera.frame();
         if (!frame) {
           if (time - lastFrameAt > TRACK_TTL) {
@@ -444,11 +439,16 @@ function Sensing() {
               frame.timestamp,
             );
             setObjects(latest.current);
-            audio.current.update(
-              latest.current,
-              prefRef.current,
-              setAnnouncement,
-            );
+            if (!listeningRef.current)
+              audio.current.update(
+                currentObservations(
+                  latest.current,
+                  prefRef.current,
+                  performance.now(),
+                ),
+                prefRef.current,
+                setAnnouncement,
+              );
           })
           .catch((e) => {
             if (token !== generation.current) return;
@@ -510,10 +510,16 @@ function Sensing() {
       depthState: "unavailable",
     };
     setObjects([o]);
-    audio.current.say(o, prefs, setAnnouncement);
+    audio.current.say(
+      o,
+      prefs,
+      setAnnouncement,
+      `Sample audio. ${phraseFor(o)}`,
+    );
   }
   async function describe() {
     if (!video.current || !running.current) return;
+    stopListening();
     const token = generation.current;
     setDescribing(true);
     setScene("");
@@ -561,47 +567,429 @@ function Sensing() {
       if (token === generation.current) setDescribing(false);
     }
   }
+  function changePreferences(next: Preferences, message?: string) {
+    commandListener.current.cancel();
+    listeningRef.current = false;
+    setListening(false);
+    prefRef.current = next;
+    setPrefs(next);
+    audio.current.cancel();
+    if (message) audio.current.status(message, next, setAnnouncement);
+  }
+  function stopSensing() {
+    pause();
+    startControl.current?.focus();
+    audio.current.status(
+      "Sensing paused. Camera off.",
+      prefRef.current,
+      setAnnouncement,
+    );
+  }
+  function repeatCurrent() {
+    stopListening();
+    if (!running.current) {
+      audio.current.status(
+        "Sensing is paused. Start sensing to hear current objects.",
+        prefRef.current,
+        setAnnouncement,
+      );
+      return;
+    }
+    const items = currentObservations(
+      latest.current,
+      prefRef.current,
+      performance.now(),
+    );
+    if (items[0]) audio.current.say(items[0], prefRef.current, setAnnouncement);
+    else
+      audio.current.status(
+        viewSummary([]).text,
+        prefRef.current,
+        setAnnouncement,
+      );
+  }
+  function readView() {
+    stopListening();
+    if (!running.current) {
+      audio.current.status(
+        "Camera off. Start sensing to read the current view.",
+        prefRef.current,
+        setAnnouncement,
+      );
+      return;
+    }
+    const summary = viewSummary(
+      currentObservations(latest.current, prefRef.current, performance.now()),
+    );
+    audio.current.readView(
+      summary.items,
+      summary.text,
+      prefRef.current,
+      setAnnouncement,
+    );
+  }
+  function readStatus() {
+    stopListening();
+    const status = running.current
+      ? "Sensing is running."
+      : state === "loading"
+        ? "Sensing is starting. You can cancel with the main button."
+        : state === "demo"
+          ? "Audio demonstration. Camera off."
+          : "Sensing is paused. Camera off.";
+    audio.current.status(
+      `${status} ${prefRef.current.focusMode === "openings" ? "Looking for gates and doors." : "Looking for people, chairs, backpacks, gates and doors."} Distance is unavailable.`,
+      prefRef.current,
+      setAnnouncement,
+    );
+  }
+  function executeCommand(command: VoiceCommand) {
+    if (command === "pause") stopSensing();
+    else if (command === "repeat") repeatCurrent();
+    else if (command === "summary") readView();
+    else if (command === "status") readStatus();
+    else
+      changePreferences(
+        {
+          ...prefRef.current,
+          focusMode: command === "openings" ? "openings" : "all",
+        },
+        command === "openings"
+          ? "Gate and door focus selected. Possible openings are not confirmed exits."
+          : "All selected objects will be announced.",
+      );
+  }
+  function stopListening() {
+    commandListener.current.cancel();
+    listeningRef.current = false;
+    setListening(false);
+    setCommandMessage("Microphone off.");
+  }
+  function listenForCommand() {
+    const factory = recognitionFactory();
+    if (!factory || !voiceEnabled) return;
+    audio.current.cancel(false);
+    void audio.current.unlock().catch(() => {});
+    listeningRef.current = true;
+    setListening(true);
+    setCommandMessage(
+      "Listening for one command. Microphone stops after eight seconds.",
+    );
+    commandListener.current.start(factory, executeCommand, (message) => {
+      listeningRef.current = false;
+      setListening(false);
+      setCommandMessage(message);
+      if (message !== "Voice command received.")
+        audio.current.status(message, prefRef.current, setAnnouncement);
+    });
+  }
+  const keyboardActions = useRef({
+    start,
+    stopSensing,
+    repeatCurrent,
+    readView,
+    readStatus,
+  });
+  keyboardActions.current = {
+    start,
+    stopSensing,
+    repeatCurrent,
+    readView,
+    readStatus,
+  };
+  useEffect(() => {
+    const keys = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (event.defaultPrevented || target?.closest("dialog")) return;
+      if (event.key === "Escape" && provider.current) {
+        event.preventDefault();
+        keyboardActions.current.stopSensing();
+      } else if (
+        event.altKey &&
+        event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
+        if (
+          target?.closest("input, select, textarea, [contenteditable='true']")
+        )
+          return;
+        const key = event.key.toLowerCase();
+        if (!["s", "r", "v", "i"].includes(key)) return;
+        event.preventDefault();
+        if (key === "s") {
+          if (provider.current) keyboardActions.current.stopSensing();
+          else void keyboardActions.current.start();
+        } else if (key === "r") keyboardActions.current.repeatCurrent();
+        else if (key === "v") keyboardActions.current.readView();
+        else keyboardActions.current.readStatus();
+      }
+    };
+    window.addEventListener("keydown", keys);
+    return () => window.removeEventListener("keydown", keys);
+  }, []);
   const isActive = state === "live" || state === "demo" || state === "loading";
+  const visibleObjects =
+    state === "demo"
+      ? objects
+      : currentObservations(objects, prefs, performance.now());
   return (
-    <main className="main">
+    <main
+      id="main-content"
+      tabIndex={-1}
+      className={`main sensing-main ${isActive ? "sensing-active" : ""}`}
+    >
       <section className="page-heading">
         <div>
-          <p className="eyebrow">
-            <span className="tiny-line" /> YOUR SURROUNDINGS, THROUGH SOUND
+          <p className="eyebrow">CAMERA AWARENESS</p>
+          <h1>Listen to your surroundings.</h1>
+          <p id="camera-instructions">
+            Hold the rear camera facing forward. Directions follow your camera.
           </p>
-          <h1>Hear what’s here.</h1>
-          <p>Point your camera forward. Let the little details come to you.</p>
+        </div>
+      </section>
+
+      <section
+        className="sensing-controls panel"
+        aria-labelledby="sensing-controls-title"
+      >
+        <div className="control-heading">
+          <h2 id="sensing-controls-title">Sensing controls</h2>
+          <span className={`status-pill ${state === "live" ? "green" : ""}`}>
+            <span aria-hidden="true" />
+            {state === "live"
+              ? "Camera on"
+              : state === "loading"
+                ? "Starting"
+                : "Camera off"}
+          </span>
         </div>
         <button
-          className="button secondary"
+          ref={startControl}
+          className={`button ${isActive ? "pause-button" : "primary"} start-button`}
+          aria-describedby="camera-instructions"
+          aria-keyshortcuts="Alt+Shift+S"
           onClick={() => {
-            pause();
-            setCalibrate(true);
+            if (isActive) stopSensing();
+            else void start();
           }}
         >
-          <Headphones size={18} /> Calibrate earbuds <ArrowUpRight size={15} />
+          {isActive ? (
+            <Pause aria-hidden="true" size={26} />
+          ) : (
+            <Play aria-hidden="true" size={26} fill="currentColor" />
+          )}
+          {state === "loading"
+            ? "Cancel start"
+            : isActive
+              ? "Pause sensing"
+              : "Start sensing"}
         </button>
+        {state === "loading" && (
+          <p className="loading-message">{loadingMessage}</p>
+        )}
+        <div
+          className="quick-actions"
+          role="group"
+          aria-label="Guidance actions"
+        >
+          <button
+            className="button secondary"
+            aria-keyshortcuts="Alt+Shift+R"
+            disabled={state !== "live"}
+            onClick={repeatCurrent}
+          >
+            <RotateCcw aria-hidden="true" size={21} /> Repeat current object
+          </button>
+          <button
+            className="button secondary"
+            aria-keyshortcuts="Alt+Shift+V"
+            disabled={state !== "live"}
+            onClick={readView}
+          >
+            <Eye aria-hidden="true" size={21} /> Read current view
+          </button>
+          <button
+            className="button secondary"
+            aria-keyshortcuts="Alt+Shift+I"
+            onClick={readStatus}
+          >
+            <Info aria-hidden="true" size={21} /> Read sensing status
+          </button>
+          <button
+            className="button secondary"
+            aria-pressed={prefs.speechOutput === "screen-reader"}
+            onClick={() =>
+              changePreferences(
+                {
+                  ...prefs,
+                  speechOutput:
+                    prefs.speechOutput === "screen-reader"
+                      ? "device"
+                      : "screen-reader",
+                },
+                prefs.speechOutput === "screen-reader"
+                  ? "App voice and tones selected."
+                  : "Screen reader output selected. App speech and tones are off.",
+              )
+            }
+          >
+            <Ear aria-hidden="true" size={21} /> Screen reader output
+          </button>
+          <button
+            className="button secondary"
+            onClick={() => {
+              pause();
+              setCalibrate(true);
+            }}
+          >
+            <Headphones aria-hidden="true" size={21} /> Test earbud directions
+          </button>
+          {gemini && (
+            <button
+              className="button secondary"
+              aria-describedby="scene-privacy"
+              disabled={state !== "live" || describing}
+              onClick={() => void describe()}
+            >
+              {describing ? (
+                <LoaderCircle aria-hidden="true" className="spin" size={21} />
+              ) : (
+                <Sparkles aria-hidden="true" size={21} />
+              )}
+              {describing ? "Describing scene…" : "Describe scene"}
+            </button>
+          )}
+        </div>
+        <fieldset className="focus-selector">
+          <legend>Objects to announce</legend>
+          <div className="choice-row">
+            <label>
+              <input
+                type="radio"
+                name="object-focus"
+                checked={prefs.focusMode !== "openings"}
+                onChange={() =>
+                  changePreferences(
+                    { ...prefs, focusMode: "all" },
+                    "All selected objects will be announced.",
+                  )
+                }
+              />{" "}
+              All selected objects
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="object-focus"
+                checked={prefs.focusMode === "openings"}
+                onChange={() =>
+                  changePreferences(
+                    { ...prefs, focusMode: "openings" },
+                    "Gate and door focus selected. Possible openings are not confirmed exits.",
+                  )
+                }
+              />{" "}
+              Gates and doors
+            </label>
+          </div>
+          <p className="setting-hint">
+            Gates and doors are included in both modes. A possible opening is
+            not a confirmed exit.
+          </p>
+        </fieldset>
       </section>
-      <div className="workspace">
+
+      <section className="announcement" aria-labelledby="announcement-title">
+        <AudioLines aria-hidden="true" size={28} />
+        <div>
+          <h2 id="announcement-title">
+            {state === "demo" ? "Sample audio" : "Latest guidance"}
+          </h2>
+          <p
+            role="status"
+            aria-live={
+              prefs.speechOutput === "screen-reader" ? "polite" : "off"
+            }
+            aria-atomic="true"
+          >
+            <span key={announcementVersion}>{announcement}</span>
+          </p>
+        </div>
+      </section>
+      {error && (
+        <div
+          className="error-message"
+          role={prefs.speechOutput === "screen-reader" ? "alert" : undefined}
+        >
+          <p>{error}</p>
+          <button className="button secondary" onClick={() => void demo()}>
+            Try audio demo
+          </button>
+        </div>
+      )}
+      <p className="distance-banner">
+        <Info aria-hidden="true" size={21} />
+        <span>
+          <strong>Distance unavailable.</strong> Guidance gives object names and
+          directions.
+        </span>
+      </p>
+
+      <div className="workspace accessible-workspace">
         <div className="left-column">
-          <section className="camera-card">
-            <div className="card-toolbar">
-              <span>
-                <Camera size={17} /> Camera view
-              </span>
-              <span
-                className={`status-pill ${state === "live" ? "green" : ""}`}
-              >
-                <span />
-                {state === "live"
-                  ? "Live sensing"
-                  : state === "loading"
-                    ? "Starting camera"
-                    : state === "demo"
-                      ? "Audio demo"
-                      : "Camera off"}
-              </span>
+          <section
+            className="panel observations"
+            aria-labelledby="objects-title"
+          >
+            <div className="panel-heading">
+              <h2 id="objects-title">
+                <Eye aria-hidden="true" size={22} />{" "}
+                {state === "demo" ? "Sample object" : "Objects in view"}
+              </h2>
             </div>
+            <p className="panel-subtitle">
+              {state === "demo"
+                ? "Demonstration only. Camera off."
+                : "Current selected detections. Use Read current view to hear a summary."}
+            </p>
+            <ul className="object-list">
+              {visibleObjects.map((o) => (
+                <li className="object-row" key={o.trackId}>
+                  <span className="object-icon" aria-hidden="true">
+                    {o.label === "person" ? (
+                      <UserRound aria-hidden="true" />
+                    ) : o.label === "chair" ? (
+                      <Armchair aria-hidden="true" />
+                    ) : o.label === "gate" || o.label === "door" ? (
+                      <DoorOpen aria-hidden="true" />
+                    ) : (
+                      <Backpack aria-hidden="true" />
+                    )}
+                  </span>
+                  <strong>
+                    {o.label === "gate" || o.label === "door"
+                      ? `Possible ${o.label}`
+                      : o.label}
+                  </strong>
+                  <span className="direction">{o.direction}</span>
+                </li>
+              ))}
+            </ul>
+            {!visibleObjects.length && (
+              <p className="empty-objects">
+                {state === "live"
+                  ? "No selected objects detected. This does not mean the path is clear."
+                  : "Start sensing to check the current camera view."}
+              </p>
+            )}
+          </section>
+
+          <details className="camera-card camera-preview">
+            <summary>
+              <Camera aria-hidden="true" size={22} /> Camera preview and visual
+              detections
+            </summary>
             <div
               className={`viewfinder ${state === "live" ? "is-live" : ""}`}
               style={state === "live" ? { aspectRatio: aspect } : undefined}
@@ -615,7 +1003,7 @@ function Sensing() {
               />
               {state === "live" && (
                 <div className="bounding-layer" aria-hidden="true">
-                  {objects.map((o) => (
+                  {visibleObjects.map((o) => (
                     <div
                       className="bounding-box"
                       key={o.trackId}
@@ -626,255 +1014,210 @@ function Sensing() {
                         height: `${o.box.height * 100}%`,
                       }}
                     >
-                      <span>
-                        {o.label} · {Math.round(o.score * 100)}%
-                      </span>
+                      <span>{o.label}</span>
                     </div>
                   ))}
                 </div>
               )}
               {state !== "live" && (
                 <div className="camera-placeholder">
-                  <div
-                    className={`radar ${state === "loading" ? "loading" : ""}`}
-                  >
-                    <div className="radar-ring ring-one" />
-                    <div className="radar-ring ring-two" />
-                    <div className="radar-ring ring-three" />
-                    <div className="radar-centre">
-                      {state === "loading" ? (
-                        <LoaderCircle className="spin" size={30} />
-                      ) : state === "demo" ? (
-                        <Headphones size={30} />
-                      ) : (
-                        <ScanLine size={30} />
-                      )}
-                    </div>
-                    <span className="radar-dot dot-one" />
-                    <span className="radar-dot dot-two" />
-                  </div>
-                  <h2>
-                    {state === "loading"
-                      ? "Getting your camera ready…"
-                      : state === "demo"
-                        ? "Explore the sound."
-                        : state === "paused"
-                          ? "Take your time."
-                          : "A new way to notice."}
-                  </h2>
+                  <Camera aria-hidden="true" size={40} />
+                  <h2>Camera off</h2>
                   <p>
-                    {state === "loading"
-                      ? loadingMessage
-                      : state === "demo"
-                        ? "Sample cues only. Your camera is off."
-                        : state === "paused"
-                          ? "Your camera and audio are paused."
-                          : "Start sensing to hear people, chairs, backpacks, gates, and doors."}
+                    Use Start sensing to begin. Audio demonstrations do not use
+                    your camera.
                   </p>
-                  {state === "demo" && (
-                    <div className="demo-cues">
-                      <button onClick={() => demoCue("person", "left")}>
-                        Person · left
-                      </button>
-                      <button onClick={() => demoCue("chair", "centre")}>
-                        Chair · centre
-                      </button>
-                      <button onClick={() => demoCue("backpack", "right")}>
-                        Backpack · right
-                      </button>
-                      <button onClick={() => demoCue("gate", "left")}>
-                        Gate · left
-                      </button>
-                      <button onClick={() => demoCue("door", "centre")}>
-                        Door · centre
-                      </button>
-                    </div>
-                  )}
                 </div>
               )}
-              <div className="viewfinder-corners" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
-              <div className="camera-bottom">
-                <span>
-                  <ShieldCheck size={14} /> Processed on your device
-                </span>
-                <span>{state === "demo" ? "SAMPLE AUDIO" : "REAR CAMERA"}</span>
-              </div>
             </div>
-            <div className="camera-actions">
-              <button
-                className={`button ${isActive ? "pause-button" : "primary"} start-button`}
-                onClick={() => {
-                  if (isActive) {
-                    pause();
-                    audio.current.status(
-                      "Sensing paused.",
-                      prefRef.current,
-                      setAnnouncement,
-                    );
-                  } else void start();
-                }}
+          </details>
+
+          <details className="panel help-panel">
+            <summary>
+              <Headphones aria-hidden="true" size={22} /> Audio demo and
+              keyboard help
+            </summary>
+            <p>
+              Hear sample cues without camera permission. These are not live
+              detections.
+            </p>
+            <button
+              className="button secondary full"
+              onClick={() => void demo()}
+            >
+              Start audio demo
+            </button>
+            {state === "demo" && (
+              <div
+                className="demo-cues"
+                role="group"
+                aria-label="Sample audio cues"
               >
-                {isActive ? (
-                  <Pause size={20} />
-                ) : (
-                  <Play size={20} fill="currentColor" />
-                )}
-                {state === "loading"
-                  ? "Cancel start"
-                  : isActive
-                    ? "Pause sensing"
-                    : "Start sensing"}
-              </button>
-              <button
-                className="button icon-button repeat"
-                aria-label="Repeat current observation"
-                disabled={state !== "live" || !objects.length}
-                onClick={() => {
-                  const item = latest.current.find(
-                    (o) => performance.now() - o.timestamp <= TRACK_TTL,
-                  );
-                  if (item) audio.current.say(item, prefs, setAnnouncement);
-                }}
-              >
-                <RotateCcw size={20} />
-              </button>
-            </div>
-            {error && (
-              <div className="error-message" role="alert">
-                {error}{" "}
-                <button onClick={() => void demo()}>Try audio demo</button>
+                <button onClick={() => demoCue("person", "left")}>
+                  Sample person, left
+                </button>
+                <button onClick={() => demoCue("chair", "centre")}>
+                  Sample chair, centre
+                </button>
+                <button onClick={() => demoCue("backpack", "right")}>
+                  Sample backpack, right
+                </button>
+                <button onClick={() => demoCue("gate", "left")}>
+                  Sample gate, left
+                </button>
+                <button onClick={() => demoCue("door", "centre")}>
+                  Sample door, centre
+                </button>
               </div>
             )}
-          </section>
-          <section className="announcement">
-            <div className="announcement-icon">
-              <AudioLines size={24} />
-            </div>
-            <div>
-              <p className="eyebrow">
-                {state === "demo" ? "DEMONSTRATION CUE" : "LATEST ANNOUNCEMENT"}
-              </p>
-              <p aria-live="polite" aria-atomic="true">
-                {announcement}
-              </p>
-            </div>
-            <span className="mini-wave" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-              <i />
-              <i />
-            </span>
-          </section>
-          <div className="privacy-note">
-            <ShieldCheck size={16} />
             <p>
-              {gemini ? (
-                <>
-                  Live sensing stays on your device. Only{" "}
-                  <strong>Describe scene</strong> sends a single photo for an AI
-                  description.
-                </>
-              ) : (
-                "Live sensing stays on your device. Camera images are not uploaded."
-              )}
+              Tab moves between controls. Enter or Space activates a button.
             </p>
-          </div>
-        </div>
-        <aside className="right-column">
-          <section className="panel observations">
-            <div className="panel-heading">
-              <h2>
-                <Eye size={19} /> In view
-              </h2>
-              <span className="count">{objects.length}</span>
-            </div>
-            <p className="panel-subtitle">
-              {state === "demo"
-                ? "Sample object · not a live detection"
-                : "Recently observed, camera-relative"}
-            </p>
-            <div className="object-list">
-              {objects.length ? (
-                objects.map((o) => (
-                  <div className="object-row" key={o.trackId}>
-                    <span className="object-icon">
-                      {o.label === "person" ? (
-                        <UserRound />
-                      ) : o.label === "chair" ? (
-                        <Armchair />
-                      ) : o.label === "gate" || o.label === "door" ? (
-                        <DoorOpen />
-                      ) : (
-                        <Backpack />
-                      )}
-                    </span>
-                    <div>
-                      <strong>
-                        {o.label === "gate" || o.label === "door"
-                          ? `Possible ${o.label}`
-                          : o.label}
-                      </strong>
-                      <small>
-                        {o.distanceMetres === null
-                          ? "Distance unavailable"
-                          : `About ${o.distanceMetres.toFixed(1)} m`}
-                      </small>
-                    </div>
-                    <span className="direction">
-                      {o.direction === "left"
-                        ? "↖"
-                        : o.direction === "right"
-                          ? "↗"
-                          : "↑"}{" "}
-                      {o.direction}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="empty-objects">
-                  <div className="empty-icon">
-                    <ScanLine size={25} />
-                  </div>
-                  <strong>
-                    {state === "live"
-                      ? "No selected objects detected"
-                      : "Ready when you are"}
-                  </strong>
-                  <p>
-                    {state === "live"
-                      ? "This does not mean the path is clear."
-                      : "Objects will appear here once you start sensing."}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="depth-note">
-              <span className="amber-dot" />
+            <dl className="shortcut-list">
               <div>
-                <strong>Distance unavailable</strong>
-                <p>Object names and directions work without depth.</p>
+                <dt>Start or pause</dt>
+                <dd>Alt + Shift + S</dd>
               </div>
-              <Link to="/probe" aria-label="Check distance capability">
-                <Info size={17} />
-              </Link>
-            </div>
-          </section>
-          <section className="panel listening">
-            <div className="panel-heading">
-              <h2>
-                <SlidersHorizontal size={19} /> Your listening preferences
-              </h2>
-            </div>
+              <div>
+                <dt>Repeat current object</dt>
+                <dd>Alt + Shift + R</dd>
+              </div>
+              <div>
+                <dt>Read current view</dt>
+                <dd>Alt + Shift + V</dd>
+              </div>
+              <div>
+                <dt>Read status</dt>
+                <dd>Alt + Shift + I</dd>
+              </div>
+              <div>
+                <dt>Pause live sensing</dt>
+                <dd>Escape</dd>
+              </div>
+            </dl>
+            <p className="setting-hint">
+              Your screen reader may use these shortcuts. The labelled buttons
+              always work.
+            </p>
+            <Link className="text-button" to="/examples">
+              Try detector example photos
+            </Link>
+          </details>
+
+          <details className="panel voice-commands">
+            <summary>
+              <Mic aria-hidden="true" size={22} /> Optional voice commands
+            </summary>
+            <p id="voice-command-privacy">
+              Tap to speak one command. Your browser may send microphone audio
+              to its speech service and require an internet connection.
+            </p>
+            {recognitionFactory() ? (
+              <>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    checked={voiceEnabled}
+                    aria-describedby="voice-command-privacy"
+                    onChange={(e) => {
+                      setVoiceEnabled(e.target.checked);
+                      if (!e.target.checked) stopListening();
+                    }}
+                  />{" "}
+                  Enable microphone commands for this session
+                </label>
+                <button
+                  className="button secondary full"
+                  disabled={!voiceEnabled || describing || state === "loading"}
+                  onClick={() => {
+                    if (listening) stopListening();
+                    else listenForCommand();
+                  }}
+                  aria-describedby="voice-command-help"
+                >
+                  <Mic aria-hidden="true" size={21} />{" "}
+                  {listening ? "Cancel listening" : "Speak a command"}
+                </button>
+              </>
+            ) : (
+              <p>
+                Voice recognition is unavailable in this browser. Use the
+                buttons above.
+              </p>
+            )}
+            <p id="voice-command-help" className="setting-hint">
+              Say “pause”, “repeat”, “read view”, “status”, “find doors”, or
+              “all objects”. Listening stops after eight seconds.
+            </p>
+            <p
+              role="status"
+              aria-live={
+                listening && prefs.speechOutput === "screen-reader"
+                  ? "polite"
+                  : "off"
+              }
+            >
+              {commandMessage}
+            </p>
+          </details>
+        </div>
+
+        <aside className="right-column" aria-label="Guidance settings">
+          <details className="panel listening">
+            <summary>
+              <SlidersHorizontal aria-hidden="true" size={22} /> Listening
+              settings
+            </summary>
+            <label className="frequency-label" htmlFor="speech-output">
+              Guidance output
+            </label>
+            <select
+              id="speech-output"
+              value={prefs.speechOutput ?? "device"}
+              onChange={(e) =>
+                changePreferences(
+                  {
+                    ...prefs,
+                    speechOutput: e.target.value as Preferences["speechOutput"],
+                  },
+                  e.target.value === "screen-reader"
+                    ? "Screen reader output selected. App speech and tones are off."
+                    : "App voice and tones selected.",
+                )
+              }
+            >
+              <option value="device">App voice and directional tones</option>
+              <option value="screen-reader">Screen reader announcements</option>
+            </select>
+            <p className="setting-hint">
+              With TalkBack or another screen reader, select screen reader
+              announcements to avoid competing voices. Directions are spoken as
+              words.
+            </p>
+            <label className="frequency-label" htmlFor="announcement-mode">
+              When to announce objects
+            </label>
+            <select
+              id="announcement-mode"
+              value={prefs.announcementMode ?? "automatic"}
+              onChange={(e) =>
+                changePreferences(
+                  {
+                    ...prefs,
+                    announcementMode: e.target
+                      .value as Preferences["announcementMode"],
+                  },
+                  e.target.value === "on-request"
+                    ? "On request selected. Use Repeat current object or Read current view."
+                    : "Automatic object guidance selected.",
+                )
+              }
+            >
+              <option value="automatic">Automatically as objects change</option>
+              <option value="on-request">Only when I ask</option>
+            </select>
             <label className="slider-label" htmlFor="volume">
-              <span>
-                <Volume2 size={17} /> Volume
-              </span>
+              <span>App audio volume</span>
               <strong>{Math.round(prefs.volume * 100)}%</strong>
             </label>
             <input
@@ -884,10 +1227,47 @@ function Sensing() {
               max="1"
               step=".05"
               value={prefs.volume}
+              aria-valuetext={`${Math.round(prefs.volume * 100)} percent`}
               onChange={(e) =>
-                setPrefs({ ...prefs, volume: Number(e.target.value) })
+                changePreferences({ ...prefs, volume: Number(e.target.value) })
               }
             />
+            <div
+              className="volume-buttons"
+              role="group"
+              aria-label="App volume buttons"
+            >
+              <button
+                className="button secondary"
+                disabled={prefs.volume <= 0}
+                onClick={() =>
+                  changePreferences({
+                    ...prefs,
+                    volume: Math.max(
+                      0,
+                      Math.round((prefs.volume - 0.1) * 100) / 100,
+                    ),
+                  })
+                }
+              >
+                Volume down
+              </button>
+              <button
+                className="button secondary"
+                disabled={prefs.volume >= 1}
+                onClick={() =>
+                  changePreferences({
+                    ...prefs,
+                    volume: Math.min(
+                      1,
+                      Math.round((prefs.volume + 0.1) * 100) / 100,
+                    ),
+                  })
+                }
+              >
+                Volume up
+              </button>
+            </div>
             <label className="frequency-label" htmlFor="frequency">
               Announcement pace
             </label>
@@ -895,7 +1275,7 @@ function Sensing() {
               id="frequency"
               value={prefs.announcementIntervalMs}
               onChange={(e) =>
-                setPrefs({
+                changePreferences({
                   ...prefs,
                   announcementIntervalMs: Number(e.target.value),
                 })
@@ -905,9 +1285,6 @@ function Sensing() {
               <option value={5000}>Balanced · at least 5 seconds apart</option>
               <option value={8000}>Relaxed · at least 8 seconds apart</option>
             </select>
-            <p className="setting-hint">
-              Only new or meaningfully changed observations are announced.
-            </p>
             <label className="frequency-label" htmlFor="voice">
               Guidance voice
             </label>
@@ -918,7 +1295,9 @@ function Sensing() {
                   ? prefs.voiceURI
                   : ""
               }
-              onChange={(e) => setPrefs({ ...prefs, voiceURI: e.target.value })}
+              onChange={(e) =>
+                changePreferences({ ...prefs, voiceURI: e.target.value })
+              }
             >
               <option value="">Automatic · recommended device voice</option>
               {voices.map((v) => (
@@ -931,7 +1310,7 @@ function Sensing() {
               {selectedVoice
                 ? `Using ${selectedVoice.name}.`
                 : "Uses your device's speech voice."}{" "}
-              Voice quality depends on the voices installed on your phone.
+              Voice quality depends on installed voices.
             </p>
             <label className="frequency-label" htmlFor="speech-speed">
               Speaking speed
@@ -940,7 +1319,10 @@ function Sensing() {
               id="speech-speed"
               value={prefs.speechRate ?? 0.9}
               onChange={(e) =>
-                setPrefs({ ...prefs, speechRate: Number(e.target.value) })
+                changePreferences({
+                  ...prefs,
+                  speechRate: Number(e.target.value),
+                })
               }
             >
               <option value={0.8}>Slow</option>
@@ -953,102 +1335,67 @@ function Sensing() {
               onClick={() =>
                 audio.current.status(
                   "Take your time. Possible door, centre.",
-                  prefs,
+                  { ...prefs, speechOutput: "device" },
                   setAnnouncement,
                 )
               }
             >
-              <Volume2 size={17} /> Preview guidance voice
+              <Volume2 aria-hidden="true" size={20} /> Preview app voice
             </button>
-            <details>
-              <summary>
-                <Settings2 size={14} /> Audio mode
-              </summary>
-              <label className="sr-only" htmlFor="mode">
-                Spatial audio mode
-              </label>
-              <select
-                id="mode"
-                value={prefs.spatialMode}
-                onChange={(e) =>
-                  setPrefs({
-                    ...prefs,
-                    spatialMode: e.target.value as Preferences["spatialMode"],
-                  })
-                }
-              >
-                <option value="stereo">Stereo · left / centre / right</option>
-                <option value="hrtf">Spatial HRTF · experimental</option>
-              </select>
-            </details>
+            <label className="frequency-label" htmlFor="mode">
+              Directional tone mode
+            </label>
+            <select
+              id="mode"
+              value={prefs.spatialMode}
+              onChange={(e) =>
+                changePreferences({
+                  ...prefs,
+                  spatialMode: e.target.value as Preferences["spatialMode"],
+                })
+              }
+            >
+              <option value="stereo">Stereo · left / centre / right</option>
+              <option value="hrtf">Spatial HRTF · experimental</option>
+            </select>
+          </details>
+          <section
+            className="panel privacy-panel"
+            aria-labelledby="privacy-title"
+          >
+            <h2 id="privacy-title">
+              <ShieldCheck aria-hidden="true" size={22} /> Camera privacy
+            </h2>
+            <p>Live object detection runs on your device.</p>
+            {gemini && (
+              <p id="scene-privacy">
+                Describe scene sends one camera photo to Gemini through your
+                local server when you choose it. EchoGuide does not save the
+                photo.
+              </p>
+            )}
+            {scene && <p className="scene-result">{scene}</p>}
           </section>
-          {gemini && (
-            <section className="scene-panel">
-              <div className="scene-icon">
-                <Sparkles size={20} />
-              </div>
-              <div>
-                <h2>A little more context.</h2>
-                <p>
-                  {gemini
-                    ? "Get a brief AI description of one camera snapshot."
-                    : "Optional AI scene descriptions need a backend Gemini key."}
-                </p>
-              </div>
-              <button
-                className="button scene-button full"
-                disabled={!gemini || state !== "live" || describing}
-                onClick={() => void describe()}
-              >
-                {describing ? (
-                  <LoaderCircle size={17} className="spin" />
-                ) : (
-                  <Sparkles size={17} />
-                )}{" "}
-                {describing ? "Describing…" : "Describe scene"}
-                <ArrowUpRight size={16} />
-              </button>
-              {scene && (
-                <p className="scene-result" role="status">
-                  {scene}
-                </p>
-              )}
-              <small>
-                {gemini
-                  ? "One photo sent only when you tap."
-                  : "Local sensing works without this feature."}
-              </small>
-            </section>
-          )}
         </aside>
       </div>
       <section className="bottom-note">
-        <Info size={19} />
+        <Info aria-hidden="true" size={24} />
         <p>
-          <strong>A companion for awareness.</strong> For stationary, supervised
-          indoor use. Only selected visible objects are detected; this is not a
-          navigation or obstacle-avoidance system. A detected gate or door may
-          be locked or lead elsewhere; it is not a confirmed exit.
+          <strong>Awareness prototype.</strong> For stationary, supervised
+          indoor use. Selected objects can be missed or misidentified. This app
+          does not confirm a safe route or a usable exit.
         </p>
         <Link to="/guide">
-          Know the limits <ChevronRight size={16} />
+          Quick guide <ChevronRight aria-hidden="true" size={20} />
         </Link>
       </section>
-      <div className="utility-row">
-        <button className="text-button" onClick={() => void demo()}>
-          <Headphones size={15} /> Try the audio demo
-        </button>
-        <Link className="text-button" to="/examples">
-          Try detector example photos
+      <details className="panel diagnostics-panel">
+        <summary>
+          <Activity aria-hidden="true" size={20} /> Device diagnostics
+        </summary>
+        <Link className="text-button" to="/probe">
+          Open device check
         </Link>
-        <button
-          className="text-button"
-          onClick={() => setDiagnostics(!diagnostics)}
-        >
-          <Activity size={15} /> {diagnostics ? "Hide" : "Show"} diagnostics
-        </button>
-      </div>
-      {diagnostics && (
         <pre className="diagnostics">
           {JSON.stringify(
             {
@@ -1061,34 +1408,41 @@ function Sensing() {
               inferenceMs: inference,
               inferenceNote:
                 "Inference duration only; not camera-to-audio latency",
-              objects: objects.map((o) => ({
-                id: o.trackId,
-                label: o.label,
-                score: o.score,
-              })),
               secureContext: window.isSecureContext,
             },
             null,
             2,
           )}
         </pre>
-      )}
+      </details>
       {calibrate && (
         <Calibration
           audio={audio.current}
-          prefs={prefs}
+          prefs={{ ...prefs, speechOutput: "device" }}
           onClose={() => setCalibrate(false)}
         />
+      )}
+      {isActive && (
+        <div className="persistent-pause">
+          <button className="button pause-button" onClick={stopSensing}>
+            <Pause aria-hidden="true" size={24} />{" "}
+            {state === "loading"
+              ? "Cancel camera start"
+              : "Pause camera and guidance"}
+          </button>
+        </div>
       )}
     </main>
   );
 }
+
 function Probe() {
   const [report, setReport] = useState(newReport);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [calibrate, setCalibrate] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [testMessage, setTestMessage] = useState("");
   const video = useRef<HTMLVideoElement>(null);
   const camera = useRef(new VideoProvider());
   const xr = useRef(new XRProbe());
@@ -1169,16 +1523,16 @@ function Probe() {
       audio.current.status(
         "Depth is unavailable. Camera and voice guidance can still work.",
         readPreferences(),
-        () => {},
+        setTestMessage,
       );
     } finally {
       if (token === testGeneration.current) setBusy(false);
     }
   }
   return (
-    <main className="main narrow" ref={root}>
+    <main id="main-content" tabIndex={-1} className="main narrow" ref={root}>
       <Link to="/" className="back-link">
-        <ArrowLeft size={16} /> Back to sensing
+        <ArrowLeft aria-hidden="true" size={16} /> Back to sensing
       </Link>
       <p className="eyebrow">ON YOUR ACTUAL PHONE</p>
       <h1>Meet your device.</h1>
@@ -1193,14 +1547,14 @@ function Probe() {
           disabled={busy || checkingDepth}
           onClick={() => void cameraTest()}
         >
-          <Camera size={18} /> Test rear camera
+          <Camera aria-hidden="true" size={18} /> Test rear camera
         </button>
         <button
           className="button secondary"
           disabled={busy || checkingDepth}
           onClick={() => void xrTest()}
         >
-          <ScanLine size={18} /> Check depth (optional)
+          <ScanLine aria-hidden="true" size={18} /> Check depth (optional)
         </button>
         <button
           className="button secondary"
@@ -1209,7 +1563,7 @@ function Probe() {
             setCalibrate(true);
           }}
         >
-          <Headphones size={18} /> Test stereo cues
+          <Headphones aria-hidden="true" size={18} /> Test stereo cues
         </button>
         <button
           className="button pause-button"
@@ -1218,13 +1572,21 @@ function Probe() {
             audio.current.status(
               "Checks stopped.",
               readPreferences(),
-              () => {},
+              setTestMessage,
             );
           }}
         >
           Stop tests
         </button>
       </div>
+      <p
+        role="status"
+        aria-live={
+          readPreferences().speechOutput === "screen-reader" ? "polite" : "off"
+        }
+      >
+        {testMessage}
+      </p>
       <video
         ref={video}
         muted
@@ -1266,7 +1628,15 @@ function Probe() {
             </div>
           ))}
         </dl>
-        <p className="note" role="status">
+        <p
+          className="note"
+          role="status"
+          aria-live={
+            readPreferences().speechOutput === "screen-reader"
+              ? "polite"
+              : "off"
+          }
+        >
           {report.note}
         </p>
         <button
@@ -1282,7 +1652,7 @@ function Probe() {
               );
           }}
         >
-          <Copy size={17} />
+          <Copy aria-hidden="true" size={17} />
           {copied ? "Copied diagnostics" : "Copy diagnostics"}
         </button>
         <details>
@@ -1331,9 +1701,9 @@ function Probe() {
 }
 function Guide() {
   return (
-    <main className="main narrow">
+    <main id="main-content" tabIndex={-1} className="main narrow">
       <Link to="/" className="back-link">
-        <ArrowLeft size={16} /> Back to sensing
+        <ArrowLeft aria-hidden="true" size={16} /> Back to sensing
       </Link>
       <p className="eyebrow">A CALMER FIRST START</p>
       <h1>Point. Listen. Notice.</h1>
@@ -1344,22 +1714,22 @@ function Guide() {
       <div className="guide-grid">
         {[
           {
-            icon: <Headphones />,
+            icon: <Headphones aria-hidden="true" />,
             title: "01 · Get comfortable",
-            text: "Pair your earbuds. Start at a low volume and use Calibrate earbuds to confirm each direction.",
+            text: "Pair your earbuds. Start at a low volume and use Test earbud directions to confirm each direction.",
           },
           {
-            icon: <Camera />,
+            icon: <Camera aria-hidden="true" />,
             title: "02 · Face the same way",
             text: "Hold the rear camera facing forward. Left and right refer to the camera, so keep your head facing that direction too.",
           },
           {
-            icon: <Ear />,
+            icon: <Ear aria-hidden="true" />,
             title: "03 · Listen for a cue",
             text: "Tap Start sensing and allow camera access. A directional tone is followed by a brief spoken object label.",
           },
           {
-            icon: <Pause />,
+            icon: <Pause aria-hidden="true" />,
             title: "04 · Pause any time",
             text: "The large Pause button stops camera capture, tones, and speech. Backgrounding the app pauses sensing too.",
           },
@@ -1373,7 +1743,7 @@ function Guide() {
       </div>
       <section className="panel limits">
         <h2>
-          <ShieldCheck /> Honest about its limits
+          <ShieldCheck aria-hidden="true" /> Honest about its limits
         </h2>
         <p>
           This prototype recognises people, chairs, backpacks, gates, and doors.
@@ -1403,6 +1773,24 @@ function Guide() {
           preferences. The final sound depends on your phone's speech engine.
         </p>
         <p>
+          With TalkBack or another screen reader, turn on Screen reader output
+          in the main controls. This turns off automatic app speech and tones;
+          your screen reader announces guidance with directions in words.
+          Listening settings also lets you choose guidance only when you ask.
+        </p>
+        <p>
+          Read current view gives a brief summary of fresh detections. Repeat
+          current object reads the first current object, with gates and doors
+          first. Select Gates and doors to focus announcements on possible
+          openings. Distance remains unavailable.
+        </p>
+        <p>
+          Display settings offers larger text and high contrast, saved on your
+          device. Keyboard help and optional voice commands are below the main
+          controls. Microphone commands listen only when you choose Speak a
+          command; your browser may use an online speech service.
+        </p>
+        <p>
           Continuous detection is local. Describe scene, when configured, sends
           one selected JPEG to the backend and Gemini. Images are not saved by
           EchoGuide.
@@ -1423,7 +1811,7 @@ function Guide() {
         </a>
       </p>
       <Link className="button primary" to="/">
-        Ready to try <ArrowUpRight size={18} />
+        Ready to try <ArrowUpRight aria-hidden="true" size={18} />
       </Link>
     </main>
   );

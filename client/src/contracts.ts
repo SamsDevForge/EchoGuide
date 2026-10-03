@@ -24,6 +24,9 @@ export interface Preferences {
   spatialMode: "stereo" | "hrtf";
   voiceURI?: string;
   speechRate?: number;
+  speechOutput?: "device" | "screen-reader";
+  announcementMode?: "automatic" | "on-request";
+  focusMode?: "all" | "openings";
 }
 export const defaults: Preferences = {
   volume: 0.55,
@@ -31,6 +34,9 @@ export const defaults: Preferences = {
   spatialMode: "stereo",
   voiceURI: "",
   speechRate: 0.9,
+  speechOutput: "device",
+  announcementMode: "automatic",
+  focusMode: "all",
 };
 export interface ProviderFrame {
   image: HTMLVideoElement | HTMLCanvasElement;

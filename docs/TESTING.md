@@ -47,6 +47,22 @@ Desktop browser checks confirmed voice preview text, the speed control, and a re
 
 The local built frontend returned “Example photo. Possible gate, left.” through actual single-threaded CPU/WASM inference under the server's CSP. This catches a security-header regression that could otherwise prevent the local model from compiling. The same model and weights remain in use.
 
+## Accessibility and additional controls (3 October 2026)
+
+Root type checking and production builds passed. **61 client tests + 12 server tests = 73 passing tests.** New behavioral checks cover opening focus without removing gates/doors from default guidance, rejecting stale/future/invalid observations, brief deduplicated summaries, screen-reader output without app speech/tones, on-request guidance, summary cancellation when any included object changes or expires, exact command matching, microphone permission errors, eight-second timeout, unavailable constructors and ignored late results after cancellation/restart.
+
+Desktop checks on the production app at localhost:3001:
+
+- Main controls precede the optional camera preview; actions have visible labels. The accessibility tree excludes decorative SVGs. Screen-reader output changes the guidance region to polite and the audio tests establish that app speech/tones are suppressed. Actual assistive speech remains untested.
+- Calibration's native modal hides the background from the accessibility tree. Shift+Tab from Close wraps to Done; Tab from Done wraps to Close. Escape closes it and restores focus to Test earbud directions.
+- Navigation to Quick guide sets a page-specific title and moves focus to main content. Large text, high contrast and gate/door focus survive a reload.
+- At 375 × 844, larger text (23 px root) and high contrast reflow without horizontal overflow. The first primary control is at least 76 px tall; quick actions at least 64 px. Phone layouts use one action per row at smaller widths.
+- Explicit sample door guidance updates the transcript. Persistent Pause clears sample objects and returns to camera-off state. Start/cancel, keyboard shortcuts and focus after persistent Pause are included in the final smoke check.
+
+Voice recognition is optional, session-only and may use the browser's online recognition service. Browser control checks and mocked recognition callbacks do not establish real microphone recognition accuracy, background termination timing or offline support on a phone. Every command has an ordinary control equivalent; no hidden continuous listener or new account is required.
+
+Physical accessibility follow-up: enable TalkBack on the Nord CE5, traverse controls by swipe and explore-by-touch, confirm no duplicate app/screen-reader speech, repeat identical guidance twice, change focus and output while running, use on-request summaries, check earbud-dialog focus restoration, and verify Pause from the fixed control. Also test microphone denial/no-speech/command accuracy and native 200% text/zoom. Record actual outcomes; do not mark these passed from viewport emulation.
+
 ## Physical checklist
 
 Use a stationary, supervised indoor setup on the target OnePlus Nord CE5 with paired open-ear earbuds. Run each relevant case on the actual phone, record the outcome, and retain copied device diagnostics. The user reported depth failures on the Nord CE5 and other unspecified tested phones on **2 October 2026**. Browser/Android versions and copied error reports were not supplied. Other physical results below remain pending; the revised depth check has not passed on a phone.

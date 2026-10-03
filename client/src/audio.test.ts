@@ -347,6 +347,66 @@ describe("audio cancellation across scene changes", () => {
     expect(spoken.map((utterance) => utterance.text)).toEqual(["chair, left."]);
   });
 
+  it("screen reader output updates the transcript without app speech or directional tones", async () => {
+    const guide = new AudioGuide(),
+      onText = vi.fn();
+    await guide.unlock();
+    const screenReader = { ...prefs, speechOutput: "screen-reader" as const };
+    guide.status("Sensing started.", screenReader, onText);
+    guide.update([item()], screenReader, onText);
+    vi.advanceTimersByTime(300);
+    expect(onText).toHaveBeenCalledWith("chair, left.");
+    expect(spoken).toHaveLength(0);
+    expect(oscillators).toHaveLength(0);
+  });
+
+  it("on request mode suppresses automatic speech while keeping manual guidance usable", async () => {
+    const guide = new AudioGuide(),
+      onText = vi.fn();
+    await guide.unlock();
+    const onRequest = { ...prefs, announcementMode: "on-request" as const };
+    guide.update([item()], onRequest, onText);
+    vi.advanceTimersByTime(300);
+    expect(spoken).toHaveLength(0);
+    guide.say(item(), onRequest, onText);
+    vi.advanceTimersByTime(260);
+    expect(spoken[0].text).toBe("chair, left.");
+  });
+
+  it("cancels a requested summary when any included object changes, even in on request mode", () => {
+    const guide = new AudioGuide();
+    const onRequest = { ...prefs, announcementMode: "on-request" as const };
+    const first = item(),
+      second = item({ trackId: "door", label: "door" });
+    guide.readView(
+      [first, second],
+      "Current view. Chair, left. Possible door, left.",
+      onRequest,
+      vi.fn(),
+    );
+    const cancels = cancelSpeech.mock.calls.length;
+    guide.update(
+      [first, { ...second, direction: "right" }],
+      onRequest,
+      vi.fn(),
+    );
+    expect(cancelSpeech).toHaveBeenCalledTimes(cancels + 1);
+  });
+
+  it("expires requested summaries rather than letting an old captured view continue speaking", () => {
+    const guide = new AudioGuide();
+    const observation = item();
+    guide.readView([observation], "Current view. Chair, left.", prefs, vi.fn());
+    const cancels = cancelSpeech.mock.calls.length;
+    vi.advanceTimersByTime(TRACK_TTL + 1);
+    guide.update(
+      [observation],
+      { ...prefs, announcementMode: "on-request" },
+      vi.fn(),
+    );
+    expect(cancelSpeech).toHaveBeenCalledTimes(cancels + 1);
+  });
+
   it("ignores completion events from cancelled speech while a new utterance is active", async () => {
     const guide = new AudioGuide();
     const onText = vi.fn();
